@@ -284,7 +284,7 @@ describe("ACP agent stdio lifecycle", () => {
       ).rejects.toThrow(`ACP agent "${process.execPath}" is not running`);
       await expect(exited.promise).resolves.toMatchObject(
         WINDOWS_SIGTERM_KILL_IS_UNTRAPPABLE_TERMINATE_PROCESS
-          ? { code: null, signal: "SIGTERM" }
+          ? { code: 1, signal: null }
           : { code: 0, signal: null },
       );
     } finally {
