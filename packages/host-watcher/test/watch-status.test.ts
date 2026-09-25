@@ -553,7 +553,7 @@ describe.sequential("watchWorkspaceStatus", () => {
       await waitForCallCount(() => callbackCount, 1, WATCH_TEST_TIMEOUT_MS);
       expect(callbackCount).toBe(1);
       expect(watchErrors).toHaveLength(1);
-      expect(watchErrors[0]).toContain(repoPath);
+      expect(watchErrors[0]).toContain(normalizeWatchPath(repoPath));
       expect(watchErrors[0]).toContain(
         "Workspace status callback failed: boom",
       );
@@ -1049,7 +1049,7 @@ describe.sequential("watchWorkspaceStatus", () => {
         WATCH_TEST_TIMEOUT_MS,
       );
       expect(watchErrors).toHaveLength(1);
-      expect(watchErrors[0]).toContain(repoPath);
+      expect(watchErrors[0]).toContain(normalizeWatchPath(repoPath));
       expect(watchErrors[0]).toContain("workspace subscription unavailable");
       expect(getWorkspaceSubscriptionAttemptCount()).toBeGreaterThan(1);
     } finally {

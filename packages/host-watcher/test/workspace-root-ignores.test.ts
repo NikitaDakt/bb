@@ -173,7 +173,7 @@ describe("workspace root watch events inside nested heavy directories (#1779)", 
         nestedRepos: 1,
         packagesPerNestedRepo: 1,
       });
-      const realRoot = fsSync.realpathSync(root);
+      const realRoot = fsSync.realpathSync.native(root);
       const nestedPackageFile = path.join(
         realRoot,
         "apps",

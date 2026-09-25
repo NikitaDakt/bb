@@ -2767,6 +2767,9 @@ importers:
       '@types/semver':
         specifier: ^7.7.1
         version: 7.7.1
+      npm:
+        specifier: 11.16.0
+        version: 11.16.0
       typescript:
         specifier: npm:@typescript/typescript6@^6.0.2
         version: '@typescript/typescript6@6.0.2'

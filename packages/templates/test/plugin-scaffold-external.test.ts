@@ -29,6 +29,10 @@ import { scaffoldPlugin } from "../src/plugin-scaffold.js";
 const execFileAsync = promisify(execFile);
 const pluginSdkRoot = resolve(process.cwd(), "../plugin-sdk");
 const dependencyRequire = createRequire(join(pluginSdkRoot, "package.json"));
+const npmCli = join(
+  dirname(createRequire(import.meta.url).resolve("npm/package.json")),
+  "bin/npm-cli.js",
+);
 
 const EXTERNAL_DEPENDENCIES = [
   "@hugeicons/core-free-icons",
@@ -242,15 +246,22 @@ async function linkExternalDependencies(targetDir: string): Promise<void> {
     const target = join(targetDir, "node_modules", name);
     await mkdir(dirname(target), { recursive: true });
     await rm(target, { recursive: true, force: true });
-    await symlink(packageRoot(name), target, "dir");
+    await symlink(packageRoot(name), target, "junction");
   }
 }
 
 async function packPluginSdk(packDir: string): Promise<string> {
   await mkdir(packDir, { recursive: true });
   await execFileAsync(
-    "npm",
-    ["pack", "--silent", "--ignore-scripts", "--pack-destination", packDir],
+    process.execPath,
+    [
+      npmCli,
+      "pack",
+      "--silent",
+      "--ignore-scripts",
+      "--pack-destination",
+      packDir,
+    ],
     {
       cwd: pluginSdkRoot,
     },
@@ -267,8 +278,9 @@ async function installPackedSdk(
   tarball: string,
 ): Promise<void> {
   await execFileAsync(
-    "npm",
+    process.execPath,
     [
+      npmCli,
       "install",
       "--ignore-scripts",
       "--legacy-peer-deps",
@@ -320,7 +332,12 @@ async function runVitest(targetDir: string): Promise<void> {
   try {
     await execFileAsync(
       process.execPath,
-      [join(vitestRoot, "vitest.mjs"), "run", "--passWithNoTests=false"],
+      [
+        join(vitestRoot, "vitest.mjs"),
+        "run",
+        "--passWithNoTests=false",
+        "--maxWorkers=1",
+      ],
       { cwd: targetDir },
     );
   } catch (error) {
@@ -338,7 +355,11 @@ describe("external plugin scaffold types", () => {
   let installedNodeModules: string;
 
   async function useInstalledNodeModules(targetDir: string): Promise<void> {
-    await symlink(installedNodeModules, join(targetDir, "node_modules"), "dir");
+    await symlink(
+      installedNodeModules,
+      join(targetDir, "node_modules"),
+      "junction",
+    );
   }
 
   beforeAll(async () => {

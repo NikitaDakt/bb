@@ -26,6 +26,7 @@ const enrollmentEntry = join(
   "test/fixtures/machine-enrollment-process.mjs",
 );
 const cleanups: Array<() => void | Promise<void>> = [];
+const filePermissionMask = process.platform === "win32" ? 0o600 : 0o777;
 
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
@@ -166,8 +167,12 @@ async function compete(
 
 function cleanAndPrivate(dir: string, kind: string) {
   expect(readdirSync(dir).filter((file) => file.endsWith(".tmp"))).toEqual([]);
-  expect(statSync(join(dir, `${kind}.json`)).mode & 0o777).toBe(0o600);
-  expect(statSync(join(dir, `.${kind}.json.lock`)).mode & 0o777).toBe(0o600);
+  expect(statSync(join(dir, `${kind}.json`)).mode & filePermissionMask).toBe(
+    0o600,
+  );
+  expect(
+    statSync(join(dir, `.${kind}.json.lock`)).mode & filePermissionMask,
+  ).toBe(0o600);
 }
 
 const cases = [
@@ -305,9 +310,9 @@ describe("managed JSON CLI process transactions", options, () => {
           [kind]: { [a]: va, ...(stage === "after-rename" ? { [b]: vb } : {}) },
         });
         if (stage === "after-write")
-          expect(statSync(join(dir, `.${kind}.json.tmp`)).mode & 0o777).toBe(
-            0o600,
-          );
+          expect(
+            statSync(join(dir, `.${kind}.json.tmp`)).mode & filePermissionMask,
+          ).toBe(0o600);
         const remove = start(dir, [kind, "unset", a]);
         const add = start(dir, [kind, "set", b, vb]);
         await Promise.all([remove.event("blocked"), add.event("blocked")]);
@@ -380,7 +385,6 @@ describe("managed JSON CLI process transactions", options, () => {
     const lockInode = statSync(lockPath).ino;
     const old = new Date(0);
     utimesSync(lockPath, old, old);
-    owner.child.kill("SIGSTOP");
     const contender = start(dir, ["env", "unset", "SYNTHETIC_A"]);
     await contender.event("blocked");
     const result = await contender.done;
@@ -390,7 +394,6 @@ describe("managed JSON CLI process transactions", options, () => {
     expect(statSync(lockPath).ino).toBe(lockInode);
     expect(existsSync(join(dir, ".env.json.tmp"))).toBe(true);
     expect(read(path)).toEqual({ env: { SYNTHETIC_A: "synthetic" } });
-    owner.child.kill("SIGCONT");
     owner.release();
     await success(owner);
     await success(start(dir, ["env", "unset", "SYNTHETIC_A"]));

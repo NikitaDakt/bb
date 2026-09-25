@@ -41,6 +41,7 @@ jobs:
           corepack enable
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Install dependencies
+        id: dependencies
         timeout-minutes: 15
         run: |
           New-Item -ItemType Directory -Force .rt/windows-native | Out-Null
@@ -54,36 +55,51 @@ jobs:
       - name: Typecheck
         run: pnpm exec turbo run typecheck --concurrency=2 --env-mode=loose --continue=always
       - name: Test Windows runtime and shared contracts
-        run: >-
-          pnpm.cmd exec turbo run test
-          --filter=@bb/domain --filter=@bb/process-utils --filter=@bb/config
-          --filter=@bb/host-daemon-contract --filter=@bb/host-workspace --filter=@bb/host-watcher
-          --filter=@bb/host-daemon --filter=@bb/server --filter=@bb/cli --filter=@bb/desktop
-          --filter=@bb/provider-bridge-protocol --filter=@bb/provider-bridge-acp
-          --filter=@bb/plugin-build --filter=@bb/local-open-targets --filter=bb-app
-          --filter=@bb/templates --filter=bb-plugin-bb-guide
-          --filter=@bb/plugin-registry --filter=@get-bb/plugin-sdk --filter=@bb/agent-runtime
-          --filter=@bb/provider-parity --filter=bb-plugin-provider-claude-code
-          --filter=bb-plugin-provider-codex --filter=bb-plugin-provider-pi
-          --filter=bb-plugin-environment-git-worktree --filter=bb-plugin-environment-personal-workspace
-          --concurrency=1 --env-mode=loose --continue=always
-          -- --maxWorkers=2 --reporter=default --reporter=json --outputFile=.rt/windows-tests.json
+        run: |
+          $testArguments = @(
+            'exec', 'turbo', 'run', 'test',
+            '--filter=@bb/domain', '--filter=@bb/process-utils', '--filter=@bb/config',
+            '--filter=@bb/host-daemon-contract', '--filter=@bb/host-workspace', '--filter=@bb/host-watcher',
+            '--filter=@bb/host-daemon', '--filter=@bb/server', '--filter=@bb/cli', '--filter=@bb/desktop',
+            '--filter=@bb/provider-bridge-protocol', '--filter=@bb/provider-bridge-acp',
+            '--filter=@bb/plugin-build', '--filter=@bb/local-open-targets', '--filter=bb-app',
+            '--filter=@bb/templates', '--filter=bb-plugin-bb-guide',
+            '--filter=@bb/plugin-registry', '--filter=@get-bb/plugin-sdk', '--filter=@bb/agent-runtime',
+            '--filter=@bb/provider-parity', '--filter=bb-plugin-provider-claude-code',
+            '--filter=bb-plugin-provider-codex', '--filter=bb-plugin-provider-pi',
+            '--filter=bb-plugin-environment-git-worktree', '--filter=bb-plugin-environment-personal-workspace',
+            '--concurrency=1', '--env-mode=loose', '--continue=always',
+            '--', '--maxWorkers=1', '--maxConcurrency=2', '--reporter=default', '--reporter=json', '--outputFile=.rt/windows-tests.json'
+          )
+          Write-Output "Processes before tests: $(@(Get-Process).Count)"
+          $testExitCode = 1
+          try {
+            pnpm.cmd @testArguments
+            $testExitCode = $LASTEXITCODE
+          } finally {
+            $processes = Get-Process | Select-Object Id, ProcessName, HandleCount, WorkingSet64
+            $processes | ConvertTo-Json | Set-Content .rt/windows-native/processes-after-tests.json
+            $processes | Group-Object ProcessName | Sort-Object Count -Descending | Select-Object -First 10 Name, Count | Format-Table
+          }
+          exit $testExitCode
       - name: Real ConPTY
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node apps/desktop/scripts/smoke-windows-conpty.mjs
       - name: Build installer
-        if: github.event_name == 'workflow_dispatch' && inputs.build_installer
+        id: installer
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' && github.event_name == 'workflow_dispatch' && inputs.build_installer }}
         run: pnpm exec turbo run desktop:build:win --filter=@bb/desktop --concurrency=2 --env-mode=loose
       - name: Generate Windows version feed
-        if: github.event_name == 'workflow_dispatch' && inputs.build_installer
+        if: ${{ !cancelled() && steps.installer.outcome == 'success' }}
         run: pnpm --filter @bb/desktop desktop:version-feed
       - name: Packaged app and native dependencies
-        if: github.event_name == 'workflow_dispatch' && inputs.build_installer
+        if: ${{ !cancelled() && steps.installer.outcome == 'success' }}
         run: node apps/desktop/scripts/smoke-packaged-app.mjs
       - name: Packaged process cleanup
-        if: github.event_name == 'workflow_dispatch' && inputs.build_installer
+        if: ${{ !cancelled() && steps.installer.outcome == 'success' }}
         run: node apps/desktop/scripts/smoke-windows-processes.mjs --evidence-dir .rt/windows-native/unpacked
       - name: Installed app lifecycle
-        if: github.event_name == 'workflow_dispatch' && inputs.build_installer
+        if: ${{ !cancelled() && steps.installer.outcome == 'success' }}
         run: |
           $installer = @(Get-ChildItem apps/desktop/release/*Setup*.exe)
           if ($installer.Count -ne 1) { throw 'Expected one NSIS installer' }

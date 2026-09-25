@@ -913,7 +913,12 @@ describe("bb-app launcher", () => {
 
     expect(exitCode).toBe(0);
     expect(readFileSync(outputPath, "utf8")).toBe(
-      "/tmp/bb-app-test/server/dist/assets/install-machine.sh",
+      join(
+        "/tmp/bb-app-test/server/dist/assets",
+        process.platform === "win32"
+          ? "install-machine.ps1"
+          : "install-machine.sh",
+      ),
     );
   });
 
