@@ -55,6 +55,15 @@ describe("windows powershell folder picker fallback", () => {
     ).resolves.toEqual({ path: null });
   });
 
+  it("preserves the drive root selected by PowerShell", async () => {
+    await expect(
+      pickHostFolderWithDeps({
+        execFile: createRecordingExecFile("C:\\\r\n", []),
+        platform: "win32",
+      }),
+    ).resolves.toEqual({ path: "C:\\" });
+  });
+
   it("prefers the native dialog when a provider is registered", async () => {
     setNativeFolderPickerDialogProvider({
       showOpenDialog: async () => ({

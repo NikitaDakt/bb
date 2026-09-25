@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { normalizeProjectPathInput } from "@bb/domain";
 import type { HostDaemonOnlineRpcResult } from "@bb/host-daemon-contract";
 import { sanitizeInheritedChildProcessEnv } from "@bb/process-utils";
 import { ExpectedCommandDispatchError } from "../command-dispatch-support.js";
@@ -57,9 +58,8 @@ async function defaultExecFile(
 }
 
 function toPickFolderResult(selectedPath: string): PickFolderResult {
-  const trimmedPath = selectedPath.trim();
   return {
-    path: trimmedPath === "" ? null : trimmedPath.replace(/[/\\]$/, ""),
+    path: normalizeProjectPathInput(selectedPath) || null,
   };
 }
 
