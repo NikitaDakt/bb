@@ -79,7 +79,7 @@ function moveMarker(
   };
 }
 
-async function openImportedDataDir() {
+async function openImportedDataDir(sourceDataDir = SOURCE_DATA_DIR) {
   const dataDir = await makeDataDir();
   const db = initDb(join(dataDir, "bb.db"));
   upsertHost(db, noopNotifier, { id: "host-old", name: "Laptop" });
@@ -107,7 +107,7 @@ async function openImportedDataDir() {
       statusDetail: null,
     },
     activeArtifactId: null,
-    rootDir: `${SOURCE_DATA_DIR}/plugins/npm/tasks`,
+    rootDir: `${sourceDataDir}/plugins/npm/tasks`,
     version: "1.0.0",
     enabled: true,
   });
@@ -118,7 +118,7 @@ async function openImportedDataDir() {
     registrationPath,
     JSON.stringify({
       id: "tasks",
-      rootDir: `${SOURCE_DATA_DIR}/plugins/npm/tasks`,
+      rootDir: `${sourceDataDir}/plugins/npm/tasks`,
       sourcePath: "/home/me/code/tasks",
     }),
   );
@@ -144,6 +144,31 @@ function rootDirOf(db: DbConnection, pluginId: string): string | undefined {
 }
 
 describe("imported server boot", () => {
+  it("imports Windows-owned paths into the current host's path format", async () => {
+    const sourceDataDir = "C:\\Users\\Александр\\bb data";
+    const { dataDir, db, registrationPath } =
+      await openImportedDataDir(sourceDataDir);
+    try {
+      const marker = moveMarker({ sourceDataDir });
+      const result = await applyServerImportFixups({ dataDir, db, marker });
+      expect(result.rerooted.plugins).toBe(1);
+      expect(result.registrationFiles).toBe(1);
+      expect(rootDirOf(db, "tasks")).toBe(
+        join(dataDir, "plugins", "npm", "tasks"),
+      );
+      expect(JSON.parse(await readFile(registrationPath, "utf8"))).toEqual({
+        id: "tasks",
+        rootDir: join(dataDir, "plugins", "npm", "tasks"),
+        sourcePath: "/home/me/code/tasks",
+      });
+      const repeated = await applyServerImportFixups({ dataDir, db, marker });
+      expect(repeated.registrationFiles).toBe(0);
+      expect(repeated.rerooted.plugins).toBe(0);
+    } finally {
+      db.$client.close();
+    }
+  });
+
   it("applies fixups once to a real migrated database and keeps a move pending", async () => {
     const { dataDir, db, registrationPath } = await openImportedDataDir();
     try {
@@ -170,7 +195,9 @@ describe("imported server boot", () => {
         kind: "move",
         fixupsAppliedAt: 5_000,
       });
-      expect(rootDirOf(db, "tasks")).toBe(`${dataDir}/plugins/npm/tasks`);
+      expect(rootDirOf(db, "tasks")).toBe(
+        join(dataDir, "plugins", "npm", "tasks"),
+      );
       expect(getHost(db, "host-new")).toMatchObject({
         machineProviderId: null,
         resource: null,
@@ -182,7 +209,7 @@ describe("imported server boot", () => {
       expect(getAppSettings(db).machineServerUrl).toBe(DIRECT_URL);
       expect(JSON.parse(await readFile(registrationPath, "utf8"))).toEqual({
         id: "tasks",
-        rootDir: `${dataDir}/plugins/npm/tasks`,
+        rootDir: join(dataDir, "plugins", "npm", "tasks"),
         sourcePath: "/home/me/code/tasks",
       });
       expect(verifyPendingServerMove(db, pending!)).toEqual({
@@ -276,7 +303,9 @@ describe("imported server boot", () => {
       });
 
       expect(existsSync(join(dataDir, SERVER_IMPORT_FILE_NAME))).toBe(false);
-      expect(rootDirOf(db, "tasks")).toBe(`${dataDir}/plugins/npm/tasks`);
+      expect(rootDirOf(db, "tasks")).toBe(
+        join(dataDir, "plugins", "npm", "tasks"),
+      );
       expect(getHost(db, "host-new")?.machineProviderId).toBeNull();
       expect(getHost(db, "host-old")?.machineProviderId).toBe("manual");
       expect(getAppSettings(db).machineServerUrl).toBeNull();
@@ -306,7 +335,9 @@ describe("imported server boot", () => {
         kind: "manual",
         fixupsAppliedAt: 1_000,
       });
-      expect(rootDirOf(db, "tasks")).toBe(`${dataDir}/plugins/npm/tasks`);
+      expect(rootDirOf(db, "tasks")).toBe(
+        join(dataDir, "plugins", "npm", "tasks"),
+      );
       expect(getHost(db, "host-old")?.machineProviderId).toBeNull();
       expect(getHost(db, "host-new")?.machineProviderId).toBe("manual");
 

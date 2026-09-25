@@ -143,6 +143,34 @@ function itemIds(items: readonly { id: string; severity: string }[]) {
 }
 
 describe("server move checks", () => {
+  it.each(["windows-task", "windows-run-key"] as const)(
+    "allows a native Windows target with %s",
+    (serviceManager) =>
+      withTestHarness(async (harness) => {
+        seedHost(harness.deps, { id: OLD, name: "Laptop" });
+        seedPrimaryHost(harness.deps, OLD);
+        seedHost(harness.deps, { id: NEW, name: "Windows" });
+        registerInspectingDaemon(harness, OLD, inspectResult());
+        registerInspectingDaemon(
+          harness,
+          NEW,
+          inspectResult({
+            platform: "win32",
+            dataDir: "C:\\Users\\Александр\\bb data",
+            serviceManager,
+          }),
+        );
+        const result = await runServerMoveCheck(checkEnvironment(harness), {
+          moveInProgress: false,
+          request: request(),
+        });
+        expect(
+          result.response.items.filter((item) => item.severity === "blocker"),
+        ).toEqual([]);
+        expect(result.response.canMove).toBe(true);
+      }),
+  );
+
   it("blocks missing, busy, temporary, offline, and inactive targets without inspecting them", () =>
     withTestHarness(async (harness) => {
       seedHost(harness.deps, { id: OLD, name: "Laptop" });

@@ -1047,7 +1047,7 @@ export class ServerMoveService {
     const roots = new Set<string>();
     const npmPrefix = this.npmPrefix();
     if (npmPrefix !== null) {
-      roots.add(npmPrefixBbAppRoot(npmPrefix));
+      roots.add(npmPrefixBbAppRoot(npmPrefix, this.options.platform));
     }
     const packagedRoot = resolvePackagedBbAppRoot(this.options.daemonEntryPath);
     if (packagedRoot !== null) {

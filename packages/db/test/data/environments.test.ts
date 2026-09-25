@@ -420,6 +420,33 @@ describe("environment path claims", () => {
     ).toBe(owned.id);
   });
 
+  it.each([
+    ["C:\\workspaces\\repo", "c:/workspaces/repo/packages/plugin", "C:\\workspaces\\repo-other"],
+    ["\\\\server\\share\\repo", "\\\\server\\share\\repo\\plugin", "\\\\server\\share\\repo-other"],
+    ["/tmp/owned_%", "/tmp/owned_%/plugin", "/tmp/owned_ab/plugin"],
+  ])("matches literal directory boundaries under %s", (root, child, outside) => {
+    const fixture = setup();
+    const owned = seedClaim(fixture, {
+      environmentProviderId: "git-worktree",
+      path: root,
+      providerOwnsPath: true,
+    });
+    const { project: other } = createProject(fixture.db, noopNotifier, {
+      name: "other-project",
+      source: { type: "local_path", hostId: fixture.host.id, path: "/tmp/other" },
+    });
+    for (const candidate of [root, child]) {
+      expect(findProviderEnvironmentContainingPath(fixture.db, candidate)?.id).toBe(owned.id);
+      expect(findForeignManagedEnvironmentAtHostPath(fixture.db, {
+        hostId: fixture.host.id, path: candidate, projectId: other.id,
+      })?.id).toBe(owned.id);
+    }
+    expect(findProviderEnvironmentContainingPath(fixture.db, outside)).toBeNull();
+    expect(findForeignManagedEnvironmentAtHostPath(fixture.db, {
+      hostId: fixture.host.id, path: outside, projectId: other.id,
+    })).toBeNull();
+  });
+
   it("refuses a foreign project only inside a directory a provider owns", () => {
     const fixture = setup();
     const { project: other } = createProject(fixture.db, noopNotifier, {

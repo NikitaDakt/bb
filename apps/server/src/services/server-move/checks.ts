@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import semver from "semver";
 import { formatServerDataSize } from "@bb/domain";
 import { APP_SURFACE_DESKTOP, type AppSurface } from "@bb/config/app-surface";
@@ -46,6 +46,7 @@ const SUPPORTED_TARGET_PLATFORMS: ReadonlySet<string> = new Set([
   "darwin",
   "linux",
   "wsl",
+  "win32",
 ]);
 const MAX_INSPECT_PATHS = 200;
 const MAX_LISTED_PATHS = 10;
@@ -137,11 +138,9 @@ export function validateDirectServerUrl(
 }
 
 function isUnderDirectory(path: string, directory: string): boolean {
-  const resolvedPath = resolve(path);
-  const resolvedDirectory = resolve(directory);
+  const suffix = relative(resolve(directory), resolve(path));
   return (
-    resolvedPath === resolvedDirectory ||
-    resolvedPath.startsWith(`${resolvedDirectory}/`)
+    suffix !== ".." && !suffix.startsWith(`..${sep}`) && !isAbsolute(suffix)
   );
 }
 
@@ -350,7 +349,7 @@ function appendTargetInspectItems(args: {
       id: "unsupported-platform",
       severity: "blocker",
       title: `${targetName} can't run the bb server`,
-      detail: "The server runs on macOS and Linux.",
+      detail: "The server runs on macOS, Linux, and Windows.",
     });
   }
   if (inspect.dataDirHasServerData) {

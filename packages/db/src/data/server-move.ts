@@ -1,5 +1,7 @@
 import { and, eq, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
+import { posix, win32 } from "node:path";
+import { isNativeWindowsProjectPath } from "@bb/domain";
 import type { DbConnection, DbTransaction } from "../connection.js";
 import {
   hosts,
@@ -39,23 +41,53 @@ export interface PathInstalledPluginSource {
 
 const MANUAL_MACHINE_PROVIDER_ID = "manual";
 
+function rootPaths(root: string) {
+  return isNativeWindowsProjectPath(root) ? win32 : posix;
+}
+
+function normalizedPathColumn(column: SQLiteColumn, root: string) {
+  return rootPaths(root) === win32
+    ? sql`replace(${column}, '/', ${"\\"}) collate nocase`
+    : column;
+}
+
+function rootPrefix(root: string): string {
+  const separator = rootPaths(root).sep;
+  return root.endsWith(separator) ? root : `${root}${separator}`;
+}
+
 function isUnderRoot(column: SQLiteColumn, root: string): SQL {
-  const prefix = `${root}/`;
+  const prefix = rootPrefix(root);
+  const value = normalizedPathColumn(column, root);
   return or(
-    eq(column, root),
-    sql`substr(${column}, 1, length(${prefix})) = ${prefix}`,
+    sql`${value} = ${root}`,
+    sql`substr(${value}, 1, length(${prefix})) = ${prefix}`,
   )!;
 }
 
 function rerootedValue(column: SQLiteColumn, args: RerootServerOwnedPathsArgs) {
-  return sql`${args.toRoot} || substr(${column}, length(${args.fromRoot}) + 1)`;
+  const value = normalizedPathColumn(column, args.fromRoot);
+  let suffix = sql`substr(${value}, length(${rootPrefix(args.fromRoot)}) + 1)`;
+  const fromSeparator = rootPaths(args.fromRoot).sep;
+  const toSeparator = rootPaths(args.toRoot).sep;
+  if (fromSeparator !== toSeparator) {
+    suffix = sql`replace(${suffix}, ${fromSeparator}, ${toSeparator})`;
+  }
+  return sql`case when ${value} = ${args.fromRoot} then ${args.toRoot} else ${rootPrefix(args.toRoot)} || ${suffix} end`;
 }
 
 function rerootCondition(
   column: SQLiteColumn,
   args: RerootServerOwnedPathsArgs,
 ): SQL {
-  const toRootNestedInFromRoot = args.toRoot.startsWith(`${args.fromRoot}/`);
+  const paths = rootPaths(args.fromRoot);
+  const relative = paths.relative(args.fromRoot, args.toRoot);
+  const toRootNestedInFromRoot =
+    paths === rootPaths(args.toRoot) &&
+    relative !== "" &&
+    relative !== ".." &&
+    !relative.startsWith(`..${paths.sep}`) &&
+    !paths.isAbsolute(relative);
   return toRootNestedInFromRoot
     ? and(
         isUnderRoot(column, args.fromRoot),
@@ -182,7 +214,17 @@ export function rerootServerOwnedPluginPaths(
   db: DbConnection,
   args: RerootServerOwnedPathsArgs,
 ): RerootServerOwnedPathsResult {
-  if (args.fromRoot === args.toRoot) {
+  if (!rootPaths(args.fromRoot).isAbsolute(args.fromRoot) || !rootPaths(args.toRoot).isAbsolute(args.toRoot)) {
+    throw new Error("Server data directories must be absolute paths");
+  }
+  args = {
+    fromRoot: rootPaths(args.fromRoot).normalize(args.fromRoot),
+    toRoot: rootPaths(args.toRoot).normalize(args.toRoot),
+  };
+  if (
+    rootPaths(args.fromRoot) === rootPaths(args.toRoot) &&
+    rootPaths(args.fromRoot).relative(args.fromRoot, args.toRoot) === ""
+  ) {
     return {
       pluginArtifacts: 0,
       pluginMarketplaces: 0,

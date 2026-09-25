@@ -14,6 +14,8 @@ import {
   experimental_npmGlobalInstallSource as npmGlobalInstallSource,
   experimental_npmLatestVersion as npmLatestVersion,
   experimental_probeNpmGlobalPackage as probeNpmGlobalPackage,
+  experimental_PortableCommandError as PortableCommandError,
+  experimental_runPortableCommandCapture as runPortableCommandCapture,
   experimental_resolveExecutablePath as resolveExecutablePath,
   experimental_versionFrom as versionFrom,
 } from "@get-bb/plugin-sdk/provider-bridge";
@@ -133,28 +135,36 @@ export async function probePiVersion(
 ): Promise<PiVersionProbe> {
   const launch = resolvePiLaunch(process.env);
   const display = formatCommand(launch.command, [...launch.args, "--version"]);
-  const output = await commandOutput(
-    launch.command,
-    [...launch.args, "--version"],
-    args.platform === undefined ? {} : { platform: args.platform },
-  );
-  if (output === null) {
+  try {
+    const { stdout, stderr } = await runPortableCommandCapture({
+      command: launch.command,
+      args: [...launch.args, "--version"],
+      timeoutMs: VERSION_PROBE_TIMEOUT_MS,
+      ...(args.platform === undefined ? {} : { platform: args.platform }),
+    });
+    const version = versionFrom(`${stdout}\n${stderr}`);
+    return version === null
+      ? { version: null, failure: `\`${display}\` printed no version` }
+      : { version, failure: null };
+  } catch (error) {
     return {
       version: null,
-      failure: `\`${display}\` could not be run`,
+      failure: `\`${display}\` ${describePiVersionProbeFailure(error)}`,
     };
   }
-  const version = versionFrom(output);
-  return version === null
-    ? { version: null, failure: `\`${display}\` printed no version` }
-    : { version, failure: null };
 }
 
 export function describePiVersionProbeFailure(error: unknown): string {
   const failed =
-    error !== null && typeof error === "object"
-      ? (error as { code?: unknown; killed?: unknown; signal?: unknown })
-      : null;
+    error instanceof PortableCommandError
+      ? {
+          code: error.exitCode ?? error.errorCode,
+          killed: error.timedOut,
+          signal: null,
+        }
+      : error !== null && typeof error === "object"
+        ? (error as { code?: unknown; killed?: unknown; signal?: unknown })
+        : null;
   if (failed?.killed === true) {
     return `timed out after ${VERSION_PROBE_TIMEOUT_MS / 1000} s`;
   }

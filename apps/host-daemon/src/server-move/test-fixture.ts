@@ -22,7 +22,10 @@ import type { ServerMoveProgressMessage } from "@bb/host-daemon-contract";
 import { writeServerArchive, writeServerMovedFile } from "@bb/server-archive";
 import { afterEach, vi } from "vitest";
 import type { CommandOf } from "../command-dispatch-support.js";
-import type { PendingServerLaunchRequest } from "./pending-server.js";
+import {
+  stopProcessGroup,
+  type PendingServerLaunchRequest,
+} from "./pending-server.js";
 import { ServerMoveService, type ServerMoveServiceOptions } from "./service.js";
 import {
   defaultDetachedProcessSpawner,
@@ -75,9 +78,7 @@ process.on("SIGTERM", () => process.exit(0));
 export function registerServerMoveFixtureCleanup(): void {
   afterEach(async () => {
     for (const pid of spawnedPids.splice(0)) {
-      try {
-        process.kill(-pid, "SIGKILL");
-      } catch {}
+      await stopProcessGroup({ pid, timeoutMs: 1_000, sleep, now: Date.now });
     }
     await Promise.all(
       httpServers

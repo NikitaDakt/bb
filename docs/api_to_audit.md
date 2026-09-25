@@ -1101,6 +1101,19 @@ whether `retryable` should be per kind (only `sessionArchived` and
 `rateLimited` read it today) and whether the runtime should bound the
 `rateLimited` ladder from the hint rather than from a constant.
 
+## Portable provider CLI capture (`experimental_runPortableCommandCapture`, `experimental_PortableCommandError`) (`@get-bb/plugin-sdk/provider-bridge`)
+
+**What it does.** Runs a host command with stdin closed, a required timeout
+and bounded stdout/stderr. Windows command shims use the existing portable
+launcher. Returns the two output streams on success; rejects with
+`experimental_PortableCommandError` on launch failure, nonzero exit, timeout
+or output overflow. The error retains `exitCode`, `errorCode`, `stdout`,
+`stderr`, `syscall` and `timedOut`, so a provider can explain a failed probe.
+
+**Audit before stabilizing.** Verify command-shim quoting on supported
+Windows versions, confirm timeout and output limits for real providers, and
+decide whether termination signals need a separate error field.
+
 ## Provider maintenance toolkit (`experimental_resolveExecutablePath`, `experimental_readCliVersion`, `experimental_commandOutput`, `experimental_versionFrom`, `experimental_compareVersions`, `experimental_formatCommand`, `experimental_npmCommand`, `experimental_npmGlobalInstallCommand`, `experimental_npmLatestVersion`, `experimental_probeNpmGlobalPackage`, `experimental_npmGlobalInstallSource`, `experimental_installationVerification`, `experimental_downloadedInstallerCommand`, `experimental_clampPercent`) (`@get-bb/plugin-sdk/provider-bridge`)
 
 **What it does.** The host-local probes and install-action plumbing behind a

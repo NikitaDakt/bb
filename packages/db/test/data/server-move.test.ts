@@ -264,6 +264,68 @@ describe("server move data helpers", () => {
     ]);
   });
 
+  it("rejects empty and relative roots without changing stored paths", () => {
+    seedPluginPaths(db);
+    const before = pluginPaths(db);
+    for (const args of [
+      { fromRoot: "", toRoot: TARGET_ROOT },
+      { fromRoot: SOURCE_ROOT, toRoot: "relative" },
+    ]) {
+      expect(() => rerootServerOwnedPluginPaths(db, args)).toThrow("absolute paths");
+    }
+    expect(pluginPaths(db)).toEqual(before);
+  });
+
+  it("leaves equivalent Windows roots unchanged", () => {
+    const root = "C:\\Users\\me\\.bb";
+    upsertInstalledPlugin(db, pathPlugin("owned", root, root));
+    expect(rerootServerOwnedPluginPaths(db, { fromRoot: root, toRoot: "c:/users/me/.bb/" }).plugins).toBe(0);
+    expect(pluginPaths(db)[0]?.rootDir).toBe(root);
+  });
+
+  it.each([
+    {
+      fromRoot: "/home/me/.bb",
+      toRoot: "C:\\Users\\Александр\\bb data",
+      sourcePath: "/home/me/.bb/plugins/local-copy",
+      expected: "C:\\Users\\Александр\\bb data\\plugins\\local-copy",
+    },
+    {
+      fromRoot: "C:\\Users\\Александр\\.bb",
+      toRoot: "/home/me/.bb",
+      sourcePath: "c:/Users/Александр/.bb/plugins/local-copy",
+      expected: "/home/me/.bb/plugins/local-copy",
+    },
+    {
+      fromRoot: "C:\\Users\\me\\.bb",
+      toRoot: "D:\\bb data",
+      sourcePath: "C:\\Users\\me\\.bb\\plugins\\local-copy",
+      expected: "D:\\bb data\\plugins\\local-copy",
+    },
+    {
+      fromRoot: "\\\\server\\share\\bb",
+      toRoot: "\\\\server\\share\\bb\\imported",
+      sourcePath: "\\\\server\\share\\bb\\plugins\\local-copy",
+      expected: "\\\\server\\share\\bb\\imported\\plugins\\local-copy",
+    },
+  ])("re-roots $fromRoot to $toRoot across path formats once", (args) => {
+    upsertInstalledPlugin(db, pathPlugin("owned", args.sourcePath, args.sourcePath));
+    const sibling = `${args.fromRoot}-backup/plugins/local-copy`;
+    upsertInstalledPlugin(db, pathPlugin("sibling", sibling, sibling));
+
+    expect(rerootServerOwnedPluginPaths(db, args).plugins).toBe(2);
+    expect(pluginPaths(db)).toEqual([
+      { id: "owned", rootDir: args.expected, sourcePath: args.expected },
+      { id: "sibling", rootDir: sibling, sourcePath: sibling },
+    ]);
+    expect(rerootServerOwnedPluginPaths(db, args)).toEqual({
+      plugins: 0,
+      pluginArtifacts: 0,
+      pluginStateSnapshots: 0,
+      pluginMarketplaces: 0,
+    });
+  });
+
   it("swaps host roles once and leaves provider-managed targets alone", () => {
     const now = 5_000;
     upsertHost(db, noopNotifier, { id: "old-server", name: "Laptop" });

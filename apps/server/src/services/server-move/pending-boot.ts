@@ -1,6 +1,6 @@
 import type { Dirent } from "node:fs";
 import { readdir, readFile, rm } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join, posix, resolve, win32 } from "node:path";
 import { eq } from "drizzle-orm";
 import {
   countAppliedMigrations,
@@ -28,6 +28,7 @@ import {
 import { z } from "zod";
 import type { AppDeps, ServerLogger } from "../../types.js";
 import { readPrimaryHostIdFromDataDir } from "../hosts/primary-host.js";
+import { isWindowsHostPath, normalizeHostPath } from "../hosts/host-paths.js";
 import {
   oldServerAddress,
   readServerManagedFiles,
@@ -131,14 +132,25 @@ function rerootPath(
   fromRoot: string,
   toRoot: string,
 ): string | null {
-  const underFromRoot = value === fromRoot || value.startsWith(`${fromRoot}/`);
-  const alreadyUnderToRoot =
-    toRoot.startsWith(`${fromRoot}/`) &&
-    (value === toRoot || value.startsWith(`${toRoot}/`));
-  if (!underFromRoot || alreadyUnderToRoot) {
+  if (isWindowsHostPath(value) !== isWindowsHostPath(fromRoot)) return null;
+  const fromPaths = isWindowsHostPath(fromRoot) ? win32 : posix;
+  const toPaths = isWindowsHostPath(toRoot) ? win32 : posix;
+  const isInside = (relative: string) =>
+    relative !== ".." &&
+    !relative.startsWith(`..${fromPaths.sep}`) &&
+    !fromPaths.isAbsolute(relative);
+  const relative = fromPaths.relative(fromRoot, value);
+  const targetRelative = fromPaths.relative(fromRoot, toRoot);
+  if (
+    !isInside(relative) ||
+    (fromPaths === toPaths &&
+      targetRelative !== "" &&
+      isInside(targetRelative) &&
+      isInside(fromPaths.relative(toRoot, value)))
+  ) {
     return null;
   }
-  return `${toRoot}${value.slice(fromRoot.length)}`;
+  return toPaths.join(toRoot, ...relative.split(fromPaths.sep));
 }
 
 async function rerootRegistrationFile(
@@ -276,7 +288,7 @@ async function rewriteOldServerAddresses(args: {
 export async function applyServerImportFixups(
   args: ApplyServerImportFixupsArgs,
 ): Promise<ServerImportFixupResult> {
-  const fromRoot = resolve(args.marker.sourceDataDir);
+  const fromRoot = normalizeHostPath(args.marker.sourceDataDir);
   const toRoot = resolve(args.dataDir);
   const rerooted = rerootServerOwnedPluginPaths(args.db, { fromRoot, toRoot });
   const registrationFiles =

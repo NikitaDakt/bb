@@ -4,6 +4,21 @@ import { isBbManagedWorkspacePath } from "./workspace-paths.js";
 const dataDir = "/home/user/.bb";
 
 describe("isBbManagedWorkspacePath", () => {
+  it.each([
+    ["C:\\Users\\Александр\\.bb\\worktrees\\env_abc", true],
+    ["c:/Users/Александр/.bb/plugins/worktree/host-data/repo", true],
+    ["C:\\Users\\Александр\\.bb\\plugins\\worktree\\source", false],
+    ["C:\\Users\\Александр\\.bb-backup\\worktrees\\env_abc", false],
+    ["C:\\Users\\Александр\\.bb\\worktrees-backup\\env_abc", false],
+  ])("recognises Windows managed paths: %s", (candidate, expected) => {
+    expect(
+      isBbManagedWorkspacePath({
+        dataDir: "C:\\Users\\Александр\\.bb",
+        path: candidate,
+      }),
+    ).toBe(expected);
+  });
+
   it("recognises a worktree under a plugin's host data directory", () => {
     expect(
       isBbManagedWorkspacePath({

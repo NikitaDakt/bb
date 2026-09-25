@@ -7,7 +7,11 @@ import type {
   EnvironmentProviderSelection,
   EnvironmentStatus,
 } from "@bb/domain";
-import { evaluateEnvironmentLifecycleEvent } from "@bb/domain";
+import {
+  evaluateEnvironmentLifecycleEvent,
+  isNativeWindowsProjectPath,
+  normalizeProjectPathInput,
+} from "@bb/domain";
 import type { DbConnection, DbTransaction } from "../connection.js";
 import type { DbNotifier } from "../notifier.js";
 import { environments, threads } from "../schema.js";
@@ -108,6 +112,23 @@ export interface FindForeignManagedEnvironmentAtHostPathArgs {
   projectId: string;
 }
 
+function environmentContainsPath(path: string) {
+  const windows = isNativeWindowsProjectPath(path);
+  const candidate = windows ? normalizeProjectPathInput(path) : path;
+  const root = windows
+    ? sql`replace(${environments.path}, '/', ${"\\"}) collate nocase`
+    : environments.path;
+  const separator = windows ? "\\" : "/";
+  const prefix = sql`rtrim(${root}, ${separator}) || ${separator}`;
+  return and(
+    ne(environments.path, ""),
+    or(
+      sql`${root} = ${candidate}`,
+      sql`substr(${candidate}, 1, length(${prefix})) = ${prefix}`,
+    ),
+  );
+}
+
 export function findProviderEnvironmentContainingPath(
   db: DbConnection,
   path: string,
@@ -118,10 +139,7 @@ export function findProviderEnvironmentContainingPath(
       .from(environments)
       .where(
         and(
-          or(
-            eq(environments.path, path),
-            sql`${path} LIKE ${environments.path} || '/%'`,
-          ),
+          environmentContainsPath(path),
           eq(environments.providerOwnsPath, true),
           ne(environments.status, "destroyed"),
         ),
@@ -141,10 +159,7 @@ export function findForeignManagedEnvironmentAtHostPath(
       .where(
         and(
           eq(environments.hostId, args.hostId),
-          or(
-            eq(environments.path, args.path),
-            sql`${args.path} LIKE ${environments.path} || '/%'`,
-          ),
+          environmentContainsPath(args.path),
           eq(environments.providerOwnsPath, true),
           ne(environments.projectId, args.projectId),
           ne(environments.status, "destroyed"),
