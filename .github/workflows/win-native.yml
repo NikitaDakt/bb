@@ -55,7 +55,7 @@ jobs:
         run: pnpm exec turbo run typecheck --concurrency=2 --env-mode=loose --continue=always
       - name: Test Windows runtime and shared contracts
         run: >-
-          pnpm exec turbo run test
+          pnpm.cmd exec turbo run test
           --filter=@bb/domain --filter=@bb/process-utils --filter=@bb/config
           --filter=@bb/host-daemon-contract --filter=@bb/host-workspace --filter=@bb/host-watcher
           --filter=@bb/host-daemon --filter=@bb/server --filter=@bb/cli --filter=@bb/desktop
