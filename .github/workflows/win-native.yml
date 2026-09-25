@@ -52,7 +52,7 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, OSArchitecture
       - name: Typecheck
-        run: pnpm exec turbo run typecheck --concurrency=2 --env-mode=loose
+        run: pnpm exec turbo run typecheck --concurrency=2 --env-mode=loose --continue=always
       - name: Test Windows runtime and shared contracts
         run: >-
           pnpm exec turbo run test
@@ -61,6 +61,7 @@ jobs:
           --filter=@bb/host-daemon --filter=@bb/server --filter=@bb/cli --filter=@bb/desktop
           --filter=@bb/provider-bridge-protocol --filter=@bb/provider-bridge-acp
           --filter=@bb/plugin-build --filter=@bb/local-open-targets --filter=bb-app
+          --filter=@bb/templates --filter=bb-plugin-bb-guide
           --filter=bb-plugin-environment-git-worktree --filter=bb-plugin-environment-personal-workspace
           --concurrency=1 --env-mode=loose --continue=always
           -- --maxWorkers=2 --reporter=default --reporter=json --outputFile=.rt/windows-tests.json

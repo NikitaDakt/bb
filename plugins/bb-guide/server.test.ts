@@ -25,6 +25,8 @@ it("introduces bb without user-question guidance", async () => {
     });
     expect(introduction).toContain("You are working inside bb");
     expect(introduction).toContain("agentic IDE");
+    expect(introduction).toContain('"$BB_CLI"');
+    expect(introduction).toContain('& "$env:BB_CLI"');
     expect(introduction).toContain(
       "Reference a BB thread as `@thread:thr_abc123`",
     );

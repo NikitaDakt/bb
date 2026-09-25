@@ -1,7 +1,7 @@
 export const introduction = [
   "You are working inside bb, an agentic IDE for managing coding agents in projects, threads, and environments. The `bb` CLI is available when you need BB context or orchestration.",
   "",
-  '- Prefer bare `bb` on PATH. When `BB_CLI` is set, official `bb` entrypoints re-exec to that absolute binary; you can also invoke `"$BB_CLI"` directly.',
+  '- Prefer bare `bb` on PATH. When `BB_CLI` is set, official `bb` entrypoints re-exec to that absolute binary; you can also invoke it directly with `"$BB_CLI"` in POSIX shells or `& "$env:BB_CLI"` in Windows PowerShell.',
   "- Run `bb status` to see the current project, thread, and environment.",
   "- Run `bb guide` for BB concepts and `bb guide <chapter>` for command details.",
   "- Use `bb thread ...` to inspect or wait for other BB threads. Do not spawn new threads or message other threads unless the user has explicitly asked you to do so.",

@@ -119,13 +119,6 @@ describe("@bb/templates", () => {
     }
   });
 
-  it("names both the POSIX and PowerShell bb CLI invocations for agents", () => {
-    const rendered = renderTemplate("standardAgentAppendInstructions", {});
-
-    expect(rendered).toContain('"$BB_CLI"');
-    expect(rendered).toContain('& "$env:BB_CLI"');
-  });
-
   it("names both the POSIX and PowerShell environment flag for provider models", () => {
     const rendered = renderTemplate("bbGuideProviders", {});
 
