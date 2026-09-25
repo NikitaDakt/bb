@@ -33,6 +33,34 @@ import {
 registerServerMoveFixtureCleanup();
 
 describe("ServerMoveService.prepare", () => {
+  it("finds the full server in a Windows global npm prefix", async () => {
+    const fixture = await createFixture();
+    const packageRoot = join(fixture.npmPrefix, "node_modules", "bb-app");
+    const service = fixture.createService({
+      platform: "win32",
+      daemonEntryPath: null,
+      env: {
+        BB_APP_NPM_PREFIX: fixture.npmPrefix,
+        BB_SERVER_MOVE_SERVICE_MANAGER: "none",
+      },
+    });
+    const command = {
+      type: "server_move.inspect" as const,
+      paths: [],
+      port: 39101,
+    };
+    expect((await service.inspect(command)).serverEntryAvailable).toBe(false);
+    for (const file of [
+      "dist/bb-app.js",
+      "dist/bb-server.js",
+      "server/dist/index.js",
+      "app/dist/index.html",
+    ]) {
+      await writeFileWithDirs(join(packageRoot, ...file.split("/")), "");
+    }
+    expect((await service.inspect(command)).serverEntryAvailable).toBe(true);
+  });
+
   it("installs bb-app, imports the archive, keeps this machine's credentials, starts the pending server, and answers a repeated prepare with the same server", async () => {
     const installed: Buffer[] = [];
     const fixture = await createFixture({

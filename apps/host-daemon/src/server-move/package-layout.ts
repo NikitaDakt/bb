@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { z } from "zod";
+import type { HostPlatform } from "@bb/host-daemon-contract";
 import { pathExists } from "./fs.js";
 
 const BB_APP_VERSION_DEV_FALLBACK = "0.0.0-dev";
@@ -26,8 +27,16 @@ export function resolvePackagedBbAppRoot(
   return dirname(hostDaemonDir);
 }
 
-export function npmPrefixBbAppRoot(npmPrefix: string): string {
-  return join(npmPrefix, "lib", "node_modules", BB_APP_PACKAGE_NAME);
+export function npmPrefixBbAppRoot(
+  npmPrefix: string,
+  platform: HostPlatform,
+): string {
+  return join(
+    npmPrefix,
+    ...(platform === "win32" ? [] : ["lib"]),
+    "node_modules",
+    BB_APP_PACKAGE_NAME,
+  );
 }
 
 export async function resolveBbServerEntry(

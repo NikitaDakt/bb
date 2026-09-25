@@ -203,6 +203,8 @@ export {
   mimeTypeFromExtension,
   normalizeProviderCommandOutput,
   npmCommand as experimental_npmCommand,
+  PortableCommandError as experimental_PortableCommandError,
+  runPortableCommandCapture as experimental_runPortableCommandCapture,
   npmGlobalInstallCommand as experimental_npmGlobalInstallCommand,
   npmGlobalInstallSource as experimental_npmGlobalInstallSource,
   npmLatestVersion as experimental_npmLatestVersion,

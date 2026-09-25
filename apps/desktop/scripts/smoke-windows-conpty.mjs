@@ -17,7 +17,7 @@ const shellArgs = [
   "-NoProfile",
   "-NoExit",
   "-Command",
-  "chcp 65001 >$null",
+  "[Console]::InputEncoding = [Console]::OutputEncoding = $OutputEncoding = [Text.UTF8Encoding]::new($false)",
 ];
 const stepTimeoutMs = 20_000;
 const shellStartupMs = 3_000;
@@ -236,18 +236,18 @@ async function smokeWindowsConpty() {
     try {
       await sleep(shellStartupMs);
       session.pty.write(
-        Buffer.from("Write-Output ('dise' + 'ño ✓')\r", "utf8"),
+        Buffer.from("Write-Output ('dise' + 'ño ✓ Кириллица')\r", "utf8"),
       );
       const match = await waitForPattern(
         session.getOutput,
-        /diseño ✓/,
+        /diseño ✓ Кириллица/,
         stepTimeoutMs,
       );
       if (match === null) {
         const output = session.getOutput();
         const sawEnye = output.includes("diseño");
         throw new Error(
-          `UTF-8 round-trip failed: "diseño ✓" never appeared intact (input was written as explicit UTF-8 bytes, chcp 65001 bootstrap untouched${sawEnye ? "; ñ decodes in output so ConPTY output decoding works and the missing ✓ points at input encoding, not chcp" : ""}).\noutput tail:\n${outputTail(output)}`,
+          `UTF-8 round-trip failed: "diseño ✓ Кириллица" never appeared intact (explicit UTF-8 input and PowerShell console encodings${sawEnye ? "; ñ was preserved" : ""}).\noutput tail:\n${outputTail(output)}`,
         );
       }
       return { detail: `pid=${String(currentShellPid(session))}`, session };

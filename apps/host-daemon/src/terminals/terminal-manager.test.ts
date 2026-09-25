@@ -1744,7 +1744,7 @@ describe("TerminalManager", () => {
       "-NoProfile",
       "-NoExit",
       "-Command",
-      "chcp 65001 >$null",
+      "[Console]::InputEncoding = [Console]::OutputEncoding = $OutputEncoding = [Text.UTF8Encoding]::new($false)",
     ]);
     const pathKeys = Object.keys(
       harness.adapter.spawned[0]?.args.env ?? {},
@@ -1792,7 +1792,7 @@ describe("TerminalManager", () => {
       "-NoLogo",
       "-NoProfile",
       "-Command",
-      "chcp 65001 >$null; pnpm dev",
+      "[Console]::InputEncoding = [Console]::OutputEncoding = $OutputEncoding = [Text.UTF8Encoding]::new($false); pnpm dev",
     ]);
     expect(harness.messages).toContainEqual(
       expect.objectContaining({
@@ -1893,7 +1893,7 @@ describe("TerminalManager", () => {
       "-NoProfile",
       "-NoExit",
       "-Command",
-      "chcp 65001 >$null",
+      "[Console]::InputEncoding = [Console]::OutputEncoding = $OutputEncoding = [Text.UTF8Encoding]::new($false)",
     ]);
   });
 
@@ -2411,7 +2411,7 @@ describe("terminalSpawnArgsForStart", () => {
       "-NoProfile",
       "-NoExit",
       "-Command",
-      "chcp 65001 >$null",
+      "[Console]::InputEncoding = [Console]::OutputEncoding = $OutputEncoding = [Text.UTF8Encoding]::new($false)",
     ]);
     expect(
       terminalSpawnArgsForStart(
@@ -2423,7 +2423,7 @@ describe("terminalSpawnArgsForStart", () => {
       "-NoLogo",
       "-NoProfile",
       "-Command",
-      "chcp 65001 >$null; pnpm dev",
+      "[Console]::InputEncoding = [Console]::OutputEncoding = $OutputEncoding = [Text.UTF8Encoding]::new($false); pnpm dev",
     ]);
   });
 

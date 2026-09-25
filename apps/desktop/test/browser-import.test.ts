@@ -1205,7 +1205,7 @@ describe("browser cookie readers", () => {
       ),
     ).resolves.toEqual({ ok: false, reason: "notInstalled" });
     const outcome = await service.importCookies(
-      { sourceId: "firefox", sourceProfileDirectory: "Profiles/p1" },
+      { sourceId: "firefox", sourceProfileDirectory: normalize("Profiles/p1") },
       session,
     );
     expect(outcome).toEqual({

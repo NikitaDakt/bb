@@ -370,6 +370,8 @@ function isNonEmptyString(value: string | undefined): value is string {
 const WINDOWS_POWERSHELL_EXE = "powershell.exe";
 const WINDOWS_PWSH_EXE = "pwsh.exe";
 const WINDOWS_UTF8_CODE_PAGE_COMMAND = "chcp 65001";
+const WINDOWS_POWERSHELL_UTF8_COMMAND =
+  "[Console]::InputEncoding = [Console]::OutputEncoding = $OutputEncoding = [Text.UTF8Encoding]::new($false)";
 
 export async function resolveDefaultTerminalShell(
   args: ResolveDefaultTerminalShellArgs = {},
@@ -587,14 +589,14 @@ export function terminalSpawnArgsForStart(
         "-NoProfile",
         "-NoExit",
         "-Command",
-        `${WINDOWS_UTF8_CODE_PAGE_COMMAND} >$null`,
+        WINDOWS_POWERSHELL_UTF8_COMMAND,
       ];
     case "command":
       return [
         "-NoLogo",
         "-NoProfile",
         "-Command",
-        `${WINDOWS_UTF8_CODE_PAGE_COMMAND} >$null; ${message.start.command}`,
+        `${WINDOWS_POWERSHELL_UTF8_COMMAND}; ${message.start.command}`,
       ];
   }
 }
