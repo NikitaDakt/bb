@@ -62,6 +62,9 @@ jobs:
           --filter=@bb/provider-bridge-protocol --filter=@bb/provider-bridge-acp
           --filter=@bb/plugin-build --filter=@bb/local-open-targets --filter=bb-app
           --filter=@bb/templates --filter=bb-plugin-bb-guide
+          --filter=@bb/plugin-registry --filter=@get-bb/plugin-sdk --filter=@bb/agent-runtime
+          --filter=@bb/provider-parity --filter=bb-plugin-provider-claude-code
+          --filter=bb-plugin-provider-codex --filter=bb-plugin-provider-pi
           --filter=bb-plugin-environment-git-worktree --filter=bb-plugin-environment-personal-workspace
           --concurrency=1 --env-mode=loose --continue=always
           -- --maxWorkers=2 --reporter=default --reporter=json --outputFile=.rt/windows-tests.json
