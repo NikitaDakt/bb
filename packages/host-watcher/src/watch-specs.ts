@@ -1,6 +1,10 @@
 import fs from "node:fs/promises";
+import {
+  isWatchPathWithinRoot,
+  normalizeWatchEventPath,
+  toWatchRootRelativeKey,
+} from "./watch-event-path.js";
 import path from "node:path";
-import { isPathWithinDirectory } from "@bb/process-utils";
 import type {
   ParcelWatcherEventBatch,
   ParcelWatcherSubscribeOptions,
@@ -90,16 +94,14 @@ function createCommonDirWatchOptions(): ParcelWatcherSubscribeOptions {
 }
 
 export function resolveEventPath(rootPath: string, eventPath: string): string {
-  return path.isAbsolute(eventPath)
-    ? path.normalize(eventPath)
-    : path.resolve(rootPath, eventPath);
+  return normalizeWatchEventPath(rootPath, eventPath);
 }
 
 function normalizeRelativePath(
   rootPath: string,
   candidatePath: string,
 ): string {
-  return path.relative(rootPath, candidatePath).split(path.sep).join("/");
+  return toWatchRootRelativeKey(rootPath, candidatePath);
 }
 
 function isSharedGitRefPath(relativePath: string): boolean {
@@ -146,7 +148,7 @@ export function collectWorkspaceStatusChanges(args: {
 
   for (const event of args.events) {
     const candidatePath = resolveEventPath(args.spec.rootPath, event.path);
-    if (!isPathWithinDirectory(args.spec.rootPath, candidatePath)) {
+    if (!isWatchPathWithinRoot(args.spec.rootPath, candidatePath)) {
       continue;
     }
 

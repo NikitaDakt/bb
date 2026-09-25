@@ -31,6 +31,30 @@ afterEach(async () => {
 
 describe("core environment scripts", () => {
   it.each(["setup", "teardown"] as const)(
+    "runs a native PowerShell %s script without interpreting its path",
+    (kind) => {
+      const scriptName = `.bb-env-${kind}.ps1`;
+      const scriptPath = `C:\\Users\\Александр\\bb project & data\\${scriptName}`;
+      const command = buildLifecycleScriptCommand({
+        kind,
+        scriptName,
+        scriptPath,
+        platform: "win32",
+      });
+      expect(command.command).toBe("powershell.exe");
+      expect(command.args).toEqual([
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        scriptPath,
+      ]);
+    },
+  );
+
+  it.each(["setup", "teardown"] as const)(
     "supplies stdin EOF so %s continues to completion",
     async (kind) => {
       const workspacePath = await workspace(
@@ -144,28 +168,25 @@ describe("core environment scripts", () => {
     ).rejects.toThrow("cancelled");
   });
 
-  it("reports unsupported POSIX scripts on Windows for each hook", async () => {
-    expect(() =>
-      buildLifecycleScriptCommand({
-        kind: "setup",
-        scriptName: ".bb-env-setup.sh",
-        platform: "win32",
-        scriptPath: ".bb-env-setup.sh",
-      }),
-    ).toThrow("POSIX shell setup scripts are not supported on Windows");
-    const workspacePath = await workspace("teardown", "exit 0\n");
-    vi.stubGlobal("process", { ...process, platform: "win32" });
-    const output: string[] = [];
-    await expect(
-      runTeardownScript({
-        workspacePath,
-        timeoutMs: 5000,
-        onProgress: (entry) => output.push(entry.text),
-      }),
-    ).resolves.toEqual({ ran: true });
-    expect(output.join("\n")).toContain(
-      "POSIX shell teardown scripts are not supported on Windows",
+  it("runs POSIX hooks only with the explicitly resolved Git for Windows Bash", () => {
+    const input = {
+      kind: "setup" as const,
+      scriptName: ".bb-env-setup.sh",
+      platform: "win32" as const,
+      scriptPath: "C:\\bb project & data\\.bb-env-setup.sh",
+    };
+    expect(() => buildLifecycleScriptCommand(input)).toThrow(
+      "Install Git for Windows",
     );
+    expect(
+      buildLifecycleScriptCommand({
+        ...input,
+        bashPath: "C:\\Program Files\\Git\\bin\\bash.exe",
+      }),
+    ).toMatchObject({
+      command: "C:\\Program Files\\Git\\bin\\bash.exe",
+      args: [input.scriptPath],
+    });
   });
 
   it("skips absent scripts", async () => {

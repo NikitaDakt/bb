@@ -13,7 +13,8 @@ while reported teardown script failure does not block removal. Transport failure
 keeps cleanup pending until the daemon confirms hook termination. Hook identity
 and completion persist across server restarts. Attached checkout and
 personal-workspace paths skip both hooks. These semantics apply equally to CLI,
-SDK, and app launches; see [worktrees.md](worktrees.md).
+SDK, and app launches. Native Windows prefers the equivalent `.ps1` hooks
+and uses Git for Windows Bash only when the repository has `.sh` hooks alone; see [worktrees.md](worktrees.md).
 
 The Machines settings creation drawer prepares an existing-machine command when access is ready, otherwise shows setup guidance. After access is ready, Choose a machine provider reviews provider inputs and launches through `hosts.experimental_create`/`bb machine create`. A machine belongs to no project; projects reach it later through project sources.
 
@@ -30,6 +31,9 @@ Local installed-daemon start, stop, and uninstall operations are flags on
 `install-machine.sh`, not `bb machine` subcommands. `install-machine.sh --adopt` installs the
 service for an already-enrolled data directory and backs
 `bb server install-machine-service`.
+On native Windows, the same command uses `install-machine.ps1 -Adopt -DataDir`.
+The installer retains a copy in the machine data directory for `-Start`, `-Stop`,
+`-Restart`, and `-Uninstall`, each with `-DataDir`; uninstall preserves user data.
 
 Modal connection and machine commands are documented in [modal-sandboxes](../plugins/environment-modal-sandbox/skills/modal-sandboxes/SKILL.md). `bb modal image show [--json]` reads the Dockerfile shown in settings; `bb modal image set --file PATH [--json]` saves a validated plugin-wide override and `bb modal image reset [--json]` restores the bundled default for future machines; `bb modal account inspect --json` checks credentials; `bb machine create --provider modal-sandbox --json` automatically prepares the bundled image and installs the daemon. `bb machine remove MACHINE --yes` explicitly removes compute and private snapshots.
 
@@ -38,3 +42,9 @@ Modal connection and machine commands are documented in [modal-sandboxes](../plu
 `--environment-provider`; a composition rejects separate machine selectors.
 
 Modal image debugging uses `bb modal image build`, `bb modal sandbox run`, `bb modal sandbox exec ID [--json] -- COMMAND...`, and `bb modal sandbox stop ID`. Debug compute expires after 30 minutes and skips BB enrollment and project setup. See the plugin skill for output limits and typed RPC equivalents.
+
+Machine enrollment and reconnect responses include `powershellCommand` for
+native Windows alongside the existing POSIX `command`. The app provides an OS
+selector; text CLI output labels both commands. Windows installation requires
+the server-matched tarball and stores a PowerShell launcher in the machine
+data directory.

@@ -80,9 +80,11 @@ BB_HOST_DAEMON_PORT only for an intentional non-default target.
   (`bb environment providers --json` prints both facts). `--base-branch`
   belongs to `--new-environment worktree` only.
 - Enroll an existing machine with `bb machine create --provider manual`; run
-  the printed command on the target. `--no-wait` returns its host ID.
+  the printed command for the target OS (PowerShell on native Windows).
+  `--no-wait` returns its host ID.
   Cancel with `bb machine remove <host-id>`. Removal revokes access; use the
   original `install-machine.sh --uninstall --host-id <host-id>` on that box.
+  Windows: `& '<data-dir>\install-machine.ps1' -Uninstall -DataDir '<data-dir>'`.
 - Create a standalone machine with `bb machine create --provider <id>`; use
   `--inputs <JSON>` for non-secret provider inputs and `--key` for retry identity.
 - List plugin-provisioned machine choices with `bb machine providers`. Create a
@@ -96,6 +98,8 @@ BB_HOST_DAEMON_PORT only for an intentional non-default target.
 - Use `bb machine enroll` for a private core-prepared bundle. Local lifecycle is
   handled by `install-machine.sh --start|--stop|--uninstall --host-id <id>`;
   see references/thread-creation.md for ownership checks.
+  Native Windows uses the saved `install-machine.ps1` with
+  `-Start`, `-Stop`, `-Restart`, or `-Uninstall` and `-DataDir <path>`.
 - Moving the bb server to another machine is experimental (the `serverMove`
   experiment). Never move a server, abandon a move, or unlock an old copy
   without the user's explicit confirmation in this conversation: run
@@ -114,7 +118,7 @@ BB_HOST_DAEMON_PORT only for an intentional non-default target.
   failed provider teardown immediately.
 - Use `bb machine reconnect <id-or-name>` when a disconnected machine's
   server access or host key is rejected but its BB host ID must remain.
-  Run the printed short-lived command on that machine as is; it reuses the
+  Run the printed short-lived command for that OS on that machine as is; it reuses the
   machine's recorded data directory, refreshes access, and re-enrolls under
   the same host ID. Connected machines are refused, and
   `--json` returns without waiting.
@@ -150,6 +154,15 @@ bb thread context --self --json
 bb environment status "$BB_ENVIRONMENT_ID" --json
 bb plugin list --json
 bb skill list --environment "$BB_ENVIRONMENT_ID" --json
+```
+
+In PowerShell, read environment variables through `$env:`:
+
+```powershell
+bb provider list --environment "$env:BB_ENVIRONMENT_ID" --json
+bb thread show "$env:BB_THREAD_ID" --json
+bb environment status "$env:BB_ENVIRONMENT_ID" --json
+bb skill list --environment "$env:BB_ENVIRONMENT_ID" --json
 ```
 
 ## Completion

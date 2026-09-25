@@ -27,7 +27,7 @@ from the target, such as a private Tailscale Serve URL. A configured URL alone
 does not prove reachability.
 
 The Settings installer first uses the exact `bb-app` tarball served by that bb
-server at `/install/bb-app.tgz`; only servers that do not implement the route
+server at `/install/bb-app.tgz`; on macOS/Linux, only servers that do not implement the route
 (HTTP 404) fall back to the npm registry. npm installs bb-app under this
 machine enrollment's bb data directory, so the installer needs neither `sudo`
 nor a global npm configuration. Installed launchd/systemd services pass
@@ -38,8 +38,18 @@ seconds and caps at 5 minutes. A daemon never auto-downgrades to an older server
 protocol. Use Settings → Machines or `bb machine retry-update` to bypass the
 current backoff after a transient failure.
 
+On native Windows, select Windows (PowerShell) in the machine command drawer,
+or use the PowerShell command printed by `bb machine create --provider manual`
+and `bb machine reconnect`. The SDK responses include `powershellCommand`;
+`command` remains the macOS/Linux command. Both enroll through the same
+short-lived bootstrap. Windows requires the server-matched artifact and does
+not fall back to a potentially incompatible npm release. It launches Node
+through a per-user scheduled task at logon; if task registration is denied,
+the installer reports its per-user Run-key fallback and restart command.
+
 To opt out, remove `--auto-update` from the launchd plist or systemd user unit
-and reload that service. Foreground/manual `bb-app host-daemon` runs leave it off
+and reload that service. On Windows, remove that flag from the generated
+`bb-host-daemon-<host-id>.ps1` in the machine data directory. Foreground/manual `bb-app host-daemon` runs leave it off
 unless you pass `--auto-update` explicitly.
 
 `bb-app`, `bb-server`, and `bb-host-daemon` capture service stdout and stderr
@@ -281,8 +291,9 @@ explains why once. After a move from `bb-app`, or to retry by hand,
 `bb server install-machine-service [--data-dir <dir>] [--yes] [--json]` installs
 the same service: it needs
 Node.js 22.19 or newer on the PATH, stops bb running from that directory, and
-runs `install-machine.sh --adopt --data-dir <dir>`, which keeps the machine ID,
-downloads the new server's bb-app package, and installs the launchd or systemd
+runs `install-machine.sh --adopt --data-dir <dir>` on macOS/Linux or
+`install-machine.ps1 -Adopt -DataDir <dir>` on Windows, which keeps the machine ID,
+downloads the new server's bb-app package, and installs the platform's persistent
 service (`--json` prints `dataDir`, `serverUrl`, `toHostName`, and
 `serviceFile`). `bb server unlock` refuses while that service exists. `bb server unlock` removes the lock as a last resort: everything since
 the move is lost on that copy, and the new server must be stopped first. It
@@ -300,6 +311,13 @@ the server went, with actions to open the moved server or choose another server.
 It leaves the old copy locked and its machine service in place.
 
 ## Local daemon lifecycle
+
+Native Windows stores a copy of `install-machine.ps1` in the enrolled data
+directory. Run `& '<data-dir>\install-machine.ps1' -Start -DataDir '<data-dir>'`
+to start it; substitute `-Stop`, `-Restart`, or `-Uninstall` for the other
+operations. Uninstall preserves the data directory and credentials. Services
+use a per-user scheduled task, with a per-user Run entry when task registration
+is denied. BB never needs WSL for these operations.
 
 `install-machine.sh --adopt --data-dir <path>` installs the service for a data
 directory that is already enrolled, reading its machine ID from `auth.json` and

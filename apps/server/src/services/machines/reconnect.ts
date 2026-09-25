@@ -35,13 +35,15 @@ export async function prepareReconnect(
     hostId,
     enrollSource: "reconnect",
   });
+  const bootstrap: EnrollmentBootstrap = {
+    hostId,
+    serverUrl,
+    credential: credential.key,
+    expiresAt: credential.expiresAt,
+  };
   return {
-    command: manualEnrollmentCommand({
-      hostId,
-      serverUrl,
-      credential: credential.key,
-      expiresAt: credential.expiresAt,
-    }),
+    command: manualEnrollmentCommand(bootstrap),
+    powershellCommand: manualEnrollmentCommand(bootstrap, "powershell"),
     expiresAt: credential.expiresAt,
     hostId,
   };

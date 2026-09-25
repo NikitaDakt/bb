@@ -259,3 +259,11 @@ BB source checkout startup
   preserve its data and ports. See `docs/debugging-and-qa.md` for the restart
   sequence and source programmatic helpers. These are repository maintenance
   commands, not environment lifecycle hooks or installed `bb` commands.
+
+Native Windows hooks
+
+For native Windows environments, commit .bb-env-setup.ps1 and
+.bb-env-teardown.ps1. Each takes precedence over the corresponding .sh hook
+and runs in Windows PowerShell with the same streamed output, timeout and
+cancellation contract. If only .sh exists, bb uses the Bash shipped with Git
+for Windows; it never invokes the WSL bash launcher.

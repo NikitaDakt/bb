@@ -2,7 +2,11 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { findMachineServiceFile } from "../src/machine-service.js";
+import {
+  findMachineServiceFile,
+  parseWindowsMachineService,
+  formatWindowsMachineServiceCommand,
+} from "../src/machine-service.js";
 
 const tempDirs: string[] = [];
 
@@ -81,6 +85,58 @@ afterEach(async () => {
 });
 
 describe("findMachineServiceFile", () => {
+  it.each(["windows-task", "windows-run-key"])(
+    "finds the enrolled PowerShell service using %s and preserves literal arguments",
+    async (manager) => {
+      const { dataDir, homeDir } = await createRoot();
+      const quoted = (value: string) => "'" + value.replaceAll("'", "''") + "'";
+      const directory = join(dataDir, "данные user's %VAR%");
+      await mkdir(directory);
+      const args = [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\bb user's\\bb-app.js",
+        "host-daemon",
+        "--server-url",
+        "https://old.test",
+      ];
+      const content = `\uFEFF$ErrorActionPreference = 'Stop'\n$bbServiceManager = '${manager}'\n$env:BB_DATA_DIR=${quoted(directory)}\n& ${args.map(quoted).join(" ")}\nexit $LASTEXITCODE\n`;
+      const file = join(directory, "bb-host-daemon-host_test.ps1");
+      await writeFile(file, content);
+      expect(
+        await findMachineServiceFile({
+          dataDir: directory,
+          homeDir,
+          platform: "win32",
+        }),
+      ).toBe(file);
+      expect(parseWindowsMachineService(content)?.programArguments).toEqual(
+        args,
+      );
+      const replacement = [
+        ...args.slice(0, -1),
+        "https://new.test/path?x='$value&y=%test%",
+      ];
+      const updated = formatWindowsMachineServiceCommand(content, replacement);
+      expect(parseWindowsMachineService(updated)).toEqual({
+        manager,
+        environment: { BB_DATA_DIR: directory },
+        programArguments: replacement,
+      });
+      expect(updated.startsWith("\uFEFF")).toBe(true);
+    },
+  );
+
+  it("ignores a PowerShell launcher that has not installed persistence", async () => {
+    const { dataDir, homeDir } = await createRoot();
+    await writeFile(
+      join(dataDir, "bb-host-daemon-host_test.ps1"),
+      `$env:BB_DATA_DIR='${dataDir}'\n& 'node' 'bb-app.js' 'host-daemon'\n`,
+    );
+    expect(
+      await findMachineServiceFile({ dataDir, homeDir, platform: "win32" }),
+    ).toBeNull();
+  });
+
   it("finds the launch agent that runs a daemon for the data directory", async () => {
     const { dataDir, homeDir } = await createRoot();
     await writeLaunchAgent({

@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { killProcessGroup } from "@bb/process-utils";
 
 const execFileAsync = promisify(execFile);
 const POLL_INTERVAL_MS = 100;
@@ -57,7 +58,25 @@ export function isProcessRunning(pid: number): boolean {
 }
 
 async function readPsField(pid: number, field: string): Promise<string | null> {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return null;
   try {
+    if (process.platform === "win32") {
+      const value =
+        field === "command="
+          ? "$p.CommandLine"
+          : "[Math]::Floor(([DateTime]::UtcNow - $p.CreationDate.ToUniversalTime()).TotalSeconds).ToString([Globalization.CultureInfo]::InvariantCulture)";
+      const result = await execFileAsync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          `[Console]::OutputEncoding=[Text.Encoding]::UTF8; $p=Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}' -ErrorAction Stop; if ($null -ne $p) { ${value} }`,
+        ],
+        { windowsHide: true, timeout: 10_000 },
+      );
+      return result.stdout.trim() || null;
+    }
     const result = await execFileAsync("ps", ["-p", String(pid), "-o", field]);
     return result.stdout.trim();
   } catch {
@@ -96,11 +115,22 @@ export function createNodeVerifiedProcessOps(): VerifiedProcessOps {
   return {
     isRunning: (pid) => isProcessRunning(pid),
     kill(pid, signal) {
-      process.kill(pid, signal);
+      if (process.platform === "win32") {
+        killProcessGroup({
+          child: { pid, kill: (signal) => process.kill(pid, signal) },
+          signal,
+        });
+      } else {
+        process.kill(pid, signal);
+      }
     },
     readCommand: (pid) => readPsField(pid, "command="),
     async readElapsedSeconds(pid) {
       const rawElapsed = await readPsField(pid, "etime=");
+      if (process.platform === "win32") {
+        const seconds = rawElapsed === null ? NaN : Number(rawElapsed);
+        return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
+      }
       return rawElapsed === null ? null : parseElapsedSeconds(rawElapsed);
     },
     waitForExit: (args) => waitForProcessExit(args),

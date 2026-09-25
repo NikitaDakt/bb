@@ -9,6 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { parseWindowsMachineService } from "@bb/config/machine-service";
 import {
   buildServerStartArguments,
   findServiceDefinition,
@@ -85,6 +86,42 @@ function launchdPlist(args: { dataDir: string; serverUrl: string }): string {
 }
 
 describe("findServiceDefinition", () => {
+  it.each(["windows-task", "windows-run-key"])(
+    "promotes a %s daemon to a persistent server while retaining environment and BOM",
+    async (manager) => {
+      const dataDir = await createRoot();
+      const path = join(dataDir, "bb-host-daemon-host_test.ps1");
+      await writeFile(
+        path,
+        `\uFEFF$ErrorActionPreference = 'Stop'\n$bbServiceManager = '${manager}'\n$env:BB_DATA_DIR='${dataDir.replaceAll("'", "''")}'\n$env:BB_APP_NPM_PREFIX='C:\\bb machine\\npm'\n& 'C:\\node.exe' 'C:\\bb machine\\bb-app.js' 'host-daemon' '--auto-update' '--host-daemon-port' '38888' '--server-url' 'https://old.test'\nexit $LASTEXITCODE\n`,
+      );
+      const definition = await findServiceDefinition({
+        dataDir,
+        homeDir: dataDir,
+        platform: "win32",
+        env: {},
+      });
+      expect(definition?.manager).toBe(manager);
+      if (definition === null) throw new Error("Missing Windows service");
+      const next = buildServerStartArguments(definition.programArguments, {
+        dataDir,
+        serverPort: 38886,
+        hostDaemonPort: 38888,
+        bindHost: "0.0.0.0",
+      });
+      await writeServiceDefinition(definition, next);
+      const content = await readFile(path, "utf8");
+      expect(content.startsWith("\uFEFF")).toBe(true);
+      expect(parseWindowsMachineService(content)).toMatchObject({
+        manager,
+        environment: definition.environment,
+        programArguments: next,
+      });
+      expect(next).toContain("start");
+      expect(next).not.toContain("--server-url");
+    },
+  );
+
   it("finds the systemd user unit whose BB_DATA_DIR is this daemon's data dir", async () => {
     const homeDir = await createRoot();
     const dataDir = join(homeDir, ".bb-machines", "old-server");

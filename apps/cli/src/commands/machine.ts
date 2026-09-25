@@ -285,7 +285,13 @@ export function registerMachineCommands(
                 signal: controller.signal,
               });
             if (enrollmentCommand !== null) {
+              if (enrollmentCommand.powershellCommand !== undefined)
+                console.error("macOS / Linux:");
               console.error(enrollmentCommand.command);
+              if (enrollmentCommand.powershellCommand !== undefined) {
+                console.error("Windows (PowerShell):");
+                console.error(enrollmentCommand.powershellCommand);
+              }
               console.error(
                 enrollmentExpiryNotice(enrollmentCommand.expiresAt),
               );
@@ -405,7 +411,13 @@ export function registerMachineCommands(
           `Machine ${hostId} keeps its host ID. Run this command on the machine within 15 minutes:`,
         );
         console.log("");
+        if (reconnect.powershellCommand !== undefined)
+          console.log("macOS / Linux:");
         console.log(reconnect.command);
+        if (reconnect.powershellCommand !== undefined) {
+          console.log("Windows (PowerShell):");
+          console.log(reconnect.powershellCommand);
+        }
         console.error(`Waiting for machine ${hostId} to reconnect…`);
         const deadline = Date.now() + MACHINE_LIFECYCLE_TIMEOUT_MS;
         for (;;) {

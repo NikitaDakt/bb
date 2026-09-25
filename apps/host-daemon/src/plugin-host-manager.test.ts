@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import {
   mkdtemp,
   mkdir,
@@ -10,9 +11,14 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { build } from "esbuild";
 import type { HostDaemonOnlineRpcCommand } from "@bb/host-daemon-contract";
 import type { WatchPathRootArgs } from "@bb/host-watcher";
-import { sanitizeInheritedChildProcessEnv } from "@bb/process-utils";
+import {
+  sanitizeInheritedChildProcessEnv,
+  spawnPortableProcess,
+} from "@bb/process-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PluginHostManager } from "./plugin-host-manager.js";
 
@@ -199,6 +205,109 @@ describe("PluginHostManager", () => {
     );
     expect(fetchArtifact).toHaveBeenCalledOnce();
   });
+
+  it("performs workspace cleanup across the worker boundary using daemon ownership", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "bb-worker-sweep-"));
+    tempDirs.push(workspace);
+    const owned = spawnPortableProcess({
+      command: process.execPath,
+      args: ["-e", "setInterval(() => {}, 1000)"],
+      cwd: workspace,
+      stdio: "ignore",
+    });
+    const ownedClosed = new Promise<void>((resolve) =>
+      owned.once("close", resolve),
+    );
+    const foreign =
+      process.platform === "win32"
+        ? spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+            cwd: workspace,
+            stdio: "ignore",
+            windowsHide: true,
+          })
+        : undefined;
+    const foreignClosed =
+      foreign === undefined
+        ? undefined
+        : new Promise<void>((resolve) => foreign.once("close", resolve));
+    try {
+      const sdkPath = fileURLToPath(
+        new URL("../../../packages/plugin-sdk/src/host.ts", import.meta.url),
+      );
+      const bundle = await build({
+        stdin: {
+          contents: `
+            import { experimental_killProcessesWithCwdUnder } from ${JSON.stringify(sdkPath)};
+            const schema = { "~standard": { validate(value) { return { value }; } } };
+            export default {
+              experimental_apiVersion: 1,
+              contract: { sweep: { input: schema, output: schema } },
+              handlers: {
+                async sweep(input) {
+                  const killed = await experimental_killProcessesWithCwdUnder({
+                    directory: input.directory, graceMs: 0, platform: "win32",
+                    runWindowsCommand: async () => ({ stdout: "[]", stderr: "", exitCode: 0 }),
+                  });
+                  return { killed: killed.map(entry => entry.pid), workerPid: process.pid };
+                },
+              },
+            };
+          `,
+          resolveDir: workspace,
+        },
+        bundle: true,
+        platform: "node",
+        format: "esm",
+        write: false,
+        banner: {
+          js: 'import { createRequire as __testCreateRequire } from "node:module"; const require = __testCreateRequire(import.meta.url);',
+        },
+      });
+      const artifact = bundle.outputFiles[0]!.contents;
+      const manager = await createManager({
+        fetchArtifact: async () => artifact,
+      });
+      const result = await manager.call(
+        callCommand({
+          method: "sweep",
+          input: { directory: workspace },
+          timeoutMs: 30_000,
+          artifact: {
+            digest: createHash("sha256").update(artifact).digest("hex"),
+            byteLength: artifact.byteLength,
+          },
+        }),
+      );
+      expect(result.output).toMatchObject({ killed: [owned.pid] });
+      expect(Reflect.get(Object(result.output), "workerPid")).not.toBe(
+        process.pid,
+      );
+      await ownedClosed;
+      if (foreign !== undefined) {
+        expect(foreign.exitCode).toBeNull();
+        expect(foreign.signalCode).toBeNull();
+        expect(() => process.kill(foreign.pid!, 0)).not.toThrow();
+      }
+      await expect(
+        manager.call(
+          callCommand({
+            method: "sweep",
+            input: { directory: "" },
+            artifact: {
+              digest: createHash("sha256").update(artifact).digest("hex"),
+              byteLength: artifact.byteLength,
+            },
+          }),
+        ),
+      ).rejects.toThrow("Invalid workspace process cleanup arguments");
+    } finally {
+      if (owned.exitCode === null && owned.signalCode === null)
+        owned.kill("SIGKILL");
+      if (foreign?.exitCode === null && foreign.signalCode === null)
+        foreign.kill("SIGKILL");
+      await Promise.all([ownedClosed, foreignClosed]);
+    }
+  }, 45_000);
 
   it("scopes setup env, rotates while idle, and returns worker output as-is", async () => {
     const manager = await createManager({

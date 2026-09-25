@@ -15,6 +15,7 @@ import { jsonValueSchema, type JsonValue } from "@bb/domain";
 import {
   createPluginProcessTempDir,
   ensurePluginProcessDataDir,
+  killProcessesWithCwdUnder,
   sanitizeInheritedChildProcessEnv,
 } from "@bb/process-utils";
 import type { HostDaemonLogger } from "./logger.js";
@@ -114,7 +115,7 @@ interface PluginHostManagerOptions {
 
 const START_TIMEOUT_MS = 10_000;
 const CANCEL_GRACE_MS = 5_000;
-const HOST_WORKER_PROTOCOL_VERSION = 2;
+const HOST_WORKER_PROTOCOL_VERSION = 3;
 const DEFAULT_WORKER_IDLE_TIMEOUT_MS = 5 * 60_000;
 const MAX_ACTIVE_CALLS_PER_PLUGIN = 256;
 const MAX_ACTIVE_CALL_INPUT_BYTES_PER_PLUGIN = 32 * 1024 * 1024;
@@ -636,6 +637,10 @@ export class PluginHostManager {
         void this.startWorkerWatch(worker, record);
         return;
       }
+      if (record.type === "process-sweep") {
+        void this.sweepWorkerProcesses(worker, record);
+        return;
+      }
       if (record.type === "watch-stop" && typeof record.watchId === "string") {
         void this.stopWorkerWatch(worker, record.watchId);
         return;
@@ -661,6 +666,49 @@ export class PluginHostManager {
     } catch (error) {
       await this.stopWorker(worker, errorMessage(error));
       throw error;
+    }
+  }
+
+  private async sweepWorkerProcesses(
+    worker: WorkerState,
+    message: Record<string, unknown>,
+  ): Promise<void> {
+    const { requestId, directory, graceMs } = message;
+    if (typeof requestId !== "string" || requestId.length > 128) return;
+    const reply = { type: "process-sweep-result", requestId };
+    try {
+      if (
+        worker.disposing ||
+        worker.pending.size === 0 ||
+        this.workers.get(worker.pluginId) !== worker
+      ) {
+        throw new Error(
+          "Workspace process cleanup requires an active host call",
+        );
+      }
+      if (
+        typeof directory !== "string" ||
+        !isAbsolute(directory) ||
+        directory.includes("\0") ||
+        Buffer.byteLength(directory) > MAX_WATCH_PATH_BYTES ||
+        (graceMs !== undefined &&
+          (typeof graceMs !== "number" ||
+            !Number.isSafeInteger(graceMs) ||
+            graceMs < 0))
+      ) {
+        throw new Error("Invalid workspace process cleanup arguments");
+      }
+      const processes = await killProcessesWithCwdUnder({
+        directory,
+        ...(graceMs !== undefined ? { graceMs } : {}),
+      });
+      sendToWorker(worker.child, { ...reply, ok: true, processes });
+    } catch (error) {
+      sendToWorker(worker.child, {
+        ...reply,
+        ok: false,
+        error: errorMessage(error),
+      });
     }
   }
 

@@ -26,7 +26,10 @@ import {
   decodeBridgeJsonRpcResponse,
   decodeToolCallResponsePayload,
   experimental_defineProviderBridge,
+  isMissingPortableExecutable,
   mimeTypeFromExtension,
+  PortableCommandError,
+  runPortableCommandCapture,
   runBridgeRequest,
   withoutBridgeRuntimeEnv,
 } from "@bb/provider-bridge-protocol/bridge-kit";
@@ -35,7 +38,6 @@ import type {
   BridgeToolCallContent,
   BridgeToolCallImage,
 } from "@bb/provider-bridge-protocol/bridge-kit";
-import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { promises as fs, readFileSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
@@ -206,6 +208,23 @@ let runtimeRequestIdCounter = 0;
 let dynamicToolBridgePromise: Promise<AcpDynamicToolBridge> | null = null;
 
 const THREAD_STOP_CANCEL_TIMEOUT_MS = 4_000;
+const AGENT_STOP_EXIT_TIMEOUT_MS = 5_000;
+
+async function terminateAgentConnection(
+  connection: AcpAgentConnection,
+): Promise<void> {
+  connection.kill();
+  const exited = await Promise.race([
+    connection.waitForExit().then(() => true),
+    new Promise<boolean>((resolveTimeout) =>
+      setTimeout(() => resolveTimeout(false), AGENT_STOP_EXIT_TIMEOUT_MS),
+    ),
+  ]);
+  if (!exited) {
+    connection.kill("SIGKILL");
+    await connection.waitForExit();
+  }
+}
 
 interface BridgeNotification {
   jsonrpc: "2.0";
@@ -300,10 +319,7 @@ function rememberGrokContextWindow(
   }
 }
 
-function emitGrokContextWindow(
-  session: AcpThreadSession,
-  used: number,
-): void {
+function emitGrokContextWindow(session: AcpThreadSession, used: number): void {
   if (
     session.dialect.id !== "grok" ||
     session.grokContextWindowSize === undefined
@@ -766,35 +782,38 @@ async function authenticateAcpAgent(args: {
 async function loadAgentModelCatalog(
   listCommand: AcpAgentCommandParam,
 ): Promise<AgentModelCatalog | null> {
-  const stdout = await new Promise<string | null>((resolveExec, rejectExec) => {
-    execFile(
-      listCommand.command,
-      listCommand.args,
-      {
-        ...(listCommand.cwd !== undefined ? { cwd: listCommand.cwd } : {}),
-        env: {
-          ...withoutBridgeRuntimeEnv(process.env),
-          ...(listCommand.envVars ?? {}),
-        },
-        timeout: MODEL_LIST_TIMEOUT_MS,
+  let stdout: string | null;
+  try {
+    const captured = await runPortableCommandCapture({
+      command: listCommand.command,
+      args: listCommand.args,
+      ...(listCommand.cwd !== undefined ? { cwd: listCommand.cwd } : {}),
+      env: {
+        ...withoutBridgeRuntimeEnv(process.env),
+        ...(listCommand.envVars ?? {}),
       },
-      (error, out, stderr) => {
-        if (!error) {
-          resolveExec(out);
-          return;
-        }
-        if (isMissingExecutableError(error)) {
-          rejectExec(error);
-          return;
-        }
-        if (isAuthRequiredModelListError(error, out, stderr)) {
-          rejectExec(new AcpModelListAuthRequiredError());
-          return;
-        }
-        resolveExec(null);
-      },
-    );
-  });
+      timeoutMs: MODEL_LIST_TIMEOUT_MS,
+    });
+    stdout = captured.stdout;
+  } catch (error) {
+    if (isMissingExecutableError(error) || isMissingPortableExecutable(error)) {
+      throw error;
+    }
+    const failureOutput =
+      error instanceof PortableCommandError
+        ? { stdout: error.stdout, stderr: error.stderr }
+        : { stdout: "", stderr: "" };
+    if (
+      isAuthRequiredModelListError(
+        error,
+        failureOutput.stdout,
+        failureOutput.stderr,
+      )
+    ) {
+      throw new AcpModelListAuthRequiredError();
+    }
+    stdout = null;
+  }
   const key = JSON.stringify(listCommand);
   if (stdout === null) {
     process.stderr.write(
@@ -1934,7 +1953,7 @@ async function startAgentSession(
   } catch (error) {
     session.stopping = true;
     session.deferStartEmit = undefined;
-    connection.kill();
+    await terminateAgentConnection(connection);
     removeSession(session);
     await releaseCursorMcpApproval(session);
     throw error;
@@ -1967,7 +1986,7 @@ async function stopSession(session: AcpThreadSession): Promise<void> {
   }
   settleInterruptedPrompt(session);
 
-  session.connection.kill();
+  await terminateAgentConnection(session.connection);
   removeSession(session);
   await releaseCursorMcpApproval(session);
 }
@@ -1995,7 +2014,7 @@ async function releaseSession(session: AcpThreadSession): Promise<void> {
     "ACP session released before the steer was sent",
   );
   cancelPendingPermissions(session);
-  session.connection.kill();
+  await terminateAgentConnection(session.connection);
   removeSession(session);
   await releaseCursorMcpApproval(session);
 }

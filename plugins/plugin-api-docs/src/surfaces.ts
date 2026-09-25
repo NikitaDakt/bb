@@ -1059,7 +1059,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Call that worker from its server code over typed RPC",
           "Do work that has to happen on the machine itself, such as watching files or holding a wake lock",
           "Declare desired loopback ports once and let bb deliver retained declarations when an enrolled machine reconnects",
-          "Kill whatever is still running under a directory it is about to delete, SIGTERM then SIGKILL, so a torn-down workspace leaves nothing behind",
+          "Reap workspace processes before deleting a directory: POSIX uses working directories; Windows stops registered worker and daemon process trees",
           "Spawn host-local commands with a sanitized inherited environment",
         ],
         apiSymbols: [

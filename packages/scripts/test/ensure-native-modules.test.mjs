@@ -80,6 +80,7 @@ function createEnsureOptions(fakeRequire, execFileSync) {
     ],
     createRequire: () => fakeRequire,
     execFileSync,
+    verifyNativeModule,
     verifyRepairedNativeModule(name) {
       try {
         verifyNativeModule(name, fakeRequire);
@@ -391,7 +392,7 @@ describe("ensure-native-modules", () => {
         "--input-type=module",
         "--eval",
         `
-          import { ensureNativeModules } from ${JSON.stringify(scriptUrl)};
+          import { ensureNativeModules, verifyNativeModule } from ${JSON.stringify(scriptUrl)};
 
           function createRequire() {
             function Database() {
@@ -415,6 +416,7 @@ describe("ensure-native-modules", () => {
             modules: [{ name: "better-sqlite3", resolveFrom: "packages/db/package.json" }],
             createRequire,
             execFileSync() {},
+            verifyNativeModule,
             verifyRepairedNativeModule() {
               return "Wrong native binary NODE_MODULE_VERSION";
             },
@@ -427,7 +429,9 @@ describe("ensure-native-modules", () => {
 
     expect(result.status).not.toBe(0);
     expect(`${result.stdout}${result.stderr}`).toContain(
-      "better-sqlite3 still failed to load after rebuild",
+      process.platform === "win32"
+        ? "better-sqlite3 has no usable native binary on Windows"
+        : "better-sqlite3 still failed to load after rebuild",
     );
   });
 });

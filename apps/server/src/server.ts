@@ -4,7 +4,10 @@ import { reconnectBootstrapForCredential } from "./services/machines/reconnect.j
 import { getMachineEnrollmentService } from "./services/machines/machine-services.js";
 import { withManualMachineProvider } from "./services/machines/manual-provider.js";
 import { registerDesktopBrowserRoutes } from "./routes/desktop-browsers.js";
-import { INSTALL_MACHINE_SCRIPT_PATH } from "./install-machine-asset.js";
+import {
+  INSTALL_MACHINE_SCRIPT_PATH,
+  INSTALL_MACHINE_POWERSHELL_SCRIPT_PATH,
+} from "./install-machine-asset.js";
 import { createNodeWebSocket } from "@hono/node-ws";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
@@ -525,24 +528,51 @@ export function createApp(
       ...(serverMove === null ? {} : { serverMove }),
     });
   });
-  app.get("/install.sh", async (context) => {
-    const script = await readFile(INSTALL_MACHINE_SCRIPT_PATH, "utf8");
-    const credential = context.req.header("X-BB-Enrollment");
-    let bootstrap =
-      credential === undefined
-        ? null
-        : await getMachineEnrollmentService(deps).pendingBootstrapForCredential(
-            credential,
+  for (const installer of [
+    {
+      path: "/install.sh",
+      scriptPath: INSTALL_MACHINE_SCRIPT_PATH,
+      shell: "posix",
+      contentType: "text/x-shellscript; charset=utf-8",
+    },
+    {
+      path: "/install.ps1",
+      scriptPath: INSTALL_MACHINE_POWERSHELL_SCRIPT_PATH,
+      shell: "powershell",
+      contentType: "text/plain; charset=utf-8",
+    },
+  ] as const) {
+    app.get(installer.path, async (context) => {
+      const script = await readFile(installer.scriptPath, "utf8");
+      const credential = context.req.header("X-BB-Enrollment");
+      let bootstrap =
+        credential === undefined
+          ? null
+          : await getMachineEnrollmentService(
+              deps,
+            ).pendingBootstrapForCredential(credential);
+      if (credential !== undefined && bootstrap === null) {
+        try {
+          bootstrap = await reconnectBootstrapForCredential(deps, credential);
+        } catch (error) {
+          deps.logger.warn({ error }, "Could not refresh machine access");
+          return new Response(
+            "Could not refresh machine access. Run the command again, or generate a new one in bb.\n",
+            {
+              status: 503,
+              headers: {
+                "cache-control": "no-store",
+                "content-type": "text/plain",
+              },
+            },
           );
-    if (credential !== undefined && bootstrap === null) {
-      try {
-        bootstrap = await reconnectBootstrapForCredential(deps, credential);
-      } catch (error) {
-        deps.logger.warn({ error }, "Could not refresh machine access");
+        }
+      }
+      if (credential !== undefined && bootstrap === null) {
         return new Response(
-          "Could not refresh machine access. Run the command again, or generate a new one in bb.\n",
+          "Enrollment is expired or unavailable. Generate a new command in bb.\n",
           {
-            status: 503,
+            status: 403,
             headers: {
               "cache-control": "no-store",
               "content-type": "text/plain",
@@ -550,29 +580,19 @@ export function createApp(
           },
         );
       }
-    }
-    if (credential !== undefined && bootstrap === null) {
       return new Response(
-        "Enrollment is expired or unavailable. Generate a new command in bb.\n",
+        bootstrap === null
+          ? script
+          : enrolledInstallerScript(script, bootstrap, installer.shell),
         {
-          status: 403,
           headers: {
             "cache-control": "no-store",
-            "content-type": "text/plain",
+            "content-type": installer.contentType,
           },
         },
       );
-    }
-    return new Response(
-      bootstrap === null ? script : enrolledInstallerScript(script, bootstrap),
-      {
-        headers: {
-          "cache-control": "no-store",
-          "content-type": "text/x-shellscript; charset=utf-8",
-        },
-      },
-    );
-  });
+    });
+  }
   app.get("/install/version", async (context) => {
     return context.json({
       version: await bbAppArtifactService.getVersion(),

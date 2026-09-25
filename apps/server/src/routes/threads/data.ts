@@ -1,6 +1,9 @@
 import { extractThreadContextWindowUsage } from "@bb/thread-view";
 import { clearTimelineOrderingContextCache } from "../../services/threads/timeline-context-order.js";
-import path from "node:path";
+import {
+  isAbsoluteHostPath,
+  joinHostPath,
+} from "../../services/hosts/host-paths.js";
 import {
   getAppSettings,
   getThreadPluginMetadata,
@@ -120,7 +123,7 @@ function resolveThreadCompletedTurnDisplay(
 
 function validateFilePath(filePath: string): void {
   if (
-    filePath.startsWith("/") ||
+    isAbsoluteHostPath(filePath) ||
     filePath.split("/").includes("..") ||
     filePath.split("\\").includes("..")
   ) {
@@ -286,7 +289,7 @@ async function serveThreadStorageRawFile(
     {
       hostId: target.hostId,
       ...(!isHtmlPreviewPath(filePath.relativePath) ? { ifNoneMatch } : {}),
-      path: path.join(target.storagePath, filePath.relativePath),
+      path: joinHostPath(target.storagePath, filePath.relativePath),
       rootPath: target.storagePath,
     },
     (result) =>
@@ -312,7 +315,7 @@ async function serveThreadWorktreeRawFile(
     {
       hostId: environment.hostId,
       ...(!isHtmlPreviewPath(filePath.relativePath) ? { ifNoneMatch } : {}),
-      path: path.join(environment.path, filePath.relativePath),
+      path: joinHostPath(environment.path, filePath.relativePath),
       rootPath: environment.path,
     },
     (result) =>
@@ -788,7 +791,7 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
       {
         hostId: target.hostId,
         ifNoneMatch: context.req.header("if-none-match"),
-        path: path.join(target.storagePath, query.path),
+        path: joinHostPath(target.storagePath, query.path),
         rootPath: target.storagePath,
       },
       (result) =>

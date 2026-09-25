@@ -102,6 +102,8 @@ Context breakdowns are optional snapshots on `contextWindow` deltas:
 - `experimental_recordProviderChildIo`
 - `experimental_resolveExecutablePath`
 - `experimental_searchPresentation`
+- `experimental_spawnPortablePipedProcess`
+- `experimental_spawnPortableProcess`
 - `experimental_toolPresentation`
 - `experimental_versionFrom`
 - `experimental_webFetchPresentation`

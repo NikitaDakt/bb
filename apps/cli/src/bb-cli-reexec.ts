@@ -1,5 +1,5 @@
-import { spawnSync } from "node:child_process";
-import { realpathSync } from "node:fs";
+import crossSpawn from "cross-spawn";
+import { existsSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 
 export const BB_CLI_REEXEC_ENV = "BB_CLI_REEXEC";
@@ -8,11 +8,29 @@ interface MaybeReexecViaBbCliArgs {
   env?: NodeJS.ProcessEnv;
   argv?: string[];
   currentExecutablePath?: string;
+  platform?: NodeJS.Platform;
   reexec?: (args: {
     target: string;
     argv: string[];
     env: NodeJS.ProcessEnv;
   }) => void;
+}
+
+export function resolveBbCliReexecSpawnPlan(
+  cliPath: string,
+  platform: NodeJS.Platform,
+): { argsPrefix: string[]; command: string } {
+  if (platform !== "win32") {
+    return { argsPrefix: [], command: cliPath };
+  }
+  if (!cliPath.toLowerCase().endsWith(".cmd")) {
+    return { argsPrefix: [], command: cliPath };
+  }
+  const target = cliPath.slice(0, -".cmd".length);
+  if (!existsSync(target)) {
+    return { argsPrefix: [], command: cliPath };
+  }
+  return { argsPrefix: [target], command: process.execPath };
 }
 
 function tryRealpath(path: string): string | null {
@@ -58,9 +76,12 @@ export function maybeReexecViaBbCli(
     return;
   }
 
-  const result = spawnSync(target, argv, {
+  const platform = options.platform ?? process.platform;
+  const plan = resolveBbCliReexecSpawnPlan(target, platform);
+  const result = crossSpawn.sync(plan.command, [...plan.argsPrefix, ...argv], {
     env: childEnv,
     stdio: "inherit",
+    windowsHide: true,
   });
   if (result.error) {
     process.stderr.write(

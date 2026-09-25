@@ -1,5 +1,9 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
+import {
+  formatWindowsMachineServiceCommand,
+  parseWindowsMachineService,
+} from "@bb/config/machine-service";
 import type {
   HostPlatform,
   ServerMoveServiceManager,
@@ -82,6 +86,13 @@ async function listMatchingFiles(
 async function listServiceDefinitionCandidates(
   args: FindServiceDefinitionArgs,
 ): Promise<ServiceDefinitionCandidate[]> {
+  if (args.platform === "win32") {
+    const paths = await listMatchingFiles(
+      args.dataDir,
+      (name) => name.startsWith("bb-host-daemon-") && name.endsWith(".ps1"),
+    );
+    return paths.map((path) => ({ manager: "windows-task", path }));
+  }
   if (args.platform === "darwin") {
     const paths = await listMatchingFiles(
       join(args.homeDir, "Library", "LaunchAgents"),
@@ -137,10 +148,18 @@ export async function findServiceDefinition(
       }
       throw error;
     }
+    const windows =
+      candidate.manager === "windows-task"
+        ? parseWindowsMachineService(content)
+        : null;
     const parsed =
-      candidate.manager === "launchd"
-        ? parseLaunchdPlist(content)
-        : parseSystemdUnit(content, basename(candidate.path));
+      candidate.manager === "windows-task"
+        ? windows === null
+          ? null
+          : { ...windows, unitName: basename(candidate.path, ".ps1") }
+        : candidate.manager === "launchd"
+          ? parseLaunchdPlist(content)
+          : parseSystemdUnit(content, basename(candidate.path));
     const definitionDataDir = parsed?.environment.BB_DATA_DIR;
     if (
       parsed === null ||
@@ -150,7 +169,7 @@ export async function findServiceDefinition(
       continue;
     }
     return {
-      manager: candidate.manager,
+      manager: windows?.manager ?? candidate.manager,
       path: candidate.path,
       unitName: parsed.unitName,
       programArguments: parsed.programArguments,
@@ -447,6 +466,15 @@ export function formatServiceDefinitionContent(
   definition: Pick<ServiceDefinition, "manager" | "content">,
   programArguments: readonly string[],
 ): string {
+  if (
+    definition.manager === "windows-task" ||
+    definition.manager === "windows-run-key"
+  ) {
+    return formatWindowsMachineServiceCommand(
+      definition.content,
+      programArguments,
+    );
+  }
   return definition.manager === "launchd"
     ? formatLaunchdPlist(definition.content, programArguments)
     : formatSystemdUnit(definition.content, programArguments);

@@ -9,6 +9,7 @@ import {
 } from "../src/app-runtime-file.js";
 import {
   parseElapsedSeconds,
+  createNodeVerifiedProcessOps,
   stopVerifiedProcess,
   type VerifiedProcessOps,
 } from "../src/verified-process-stop.js";
@@ -121,6 +122,15 @@ describe("parseElapsedSeconds", () => {
 });
 
 describe("stopVerifiedProcess", () => {
+  it("reads the current native process identity and start time", async () => {
+    const ops = createNodeVerifiedProcessOps();
+    expect(await ops.readCommand(process.pid)).toContain("node");
+    const age = await ops.readElapsedSeconds(process.pid);
+    expect(age).not.toBeNull();
+    expect(age).toBeGreaterThanOrEqual(0);
+    expect(age).toBeLessThanOrEqual(process.uptime() + 5);
+  }, 25_000);
+
   function createOps(
     overrides: Partial<VerifiedProcessOps> = {},
   ): VerifiedProcessOps {

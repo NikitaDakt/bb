@@ -1,4 +1,4 @@
-import path from "node:path";
+import { joinHostPath } from "../hosts/host-paths.js";
 import { getLatestSessionForHost } from "@bb/db";
 import { ApiError } from "../../errors.js";
 import type { WorkSessionDeps } from "../../types.js";
@@ -22,7 +22,7 @@ export async function requireThreadStoragePath(
       false,
     );
   }
-  return path.join(session.dataDir, "thread-storage", args.threadId);
+  return joinHostPath(session.dataDir, "thread-storage", args.threadId);
 }
 
 export async function requireLiveThreadStoragePath(
@@ -30,5 +30,5 @@ export async function requireLiveThreadStoragePath(
   args: RequireThreadStoragePathArgs,
 ): Promise<string> {
   const session = requireConnectedHostSession(deps, args.hostId);
-  return path.join(session.dataDir, "thread-storage", args.threadId);
+  return joinHostPath(session.dataDir, "thread-storage", args.threadId);
 }

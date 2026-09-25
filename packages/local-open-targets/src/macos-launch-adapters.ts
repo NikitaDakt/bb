@@ -260,6 +260,12 @@ export const LAUNCH_ADAPTERS: LaunchAdapter[] = [
     kind: "editor",
     label: "VS Code",
     fileOpenBehavior: "direct",
+    windows: {
+      knownRelativePaths: [
+        ["Microsoft VS Code", "bin", "code.cmd"],
+        ["Microsoft VS Code", "Code.exe"],
+      ],
+    },
     macos: {
       openMode: "application",
       appName: "Visual Studio Code",
@@ -279,6 +285,12 @@ export const LAUNCH_ADAPTERS: LaunchAdapter[] = [
     kind: "editor",
     label: "VS Code Insiders",
     fileOpenBehavior: "direct",
+    windows: {
+      knownRelativePaths: [
+        ["Microsoft VS Code Insiders", "bin", "code-insiders.cmd"],
+        ["Microsoft VS Code Insiders", "Code - Insiders.exe"],
+      ],
+    },
     macos: {
       openMode: "application",
       appName: "Visual Studio Code - Insiders",
@@ -298,6 +310,12 @@ export const LAUNCH_ADAPTERS: LaunchAdapter[] = [
     kind: "editor",
     label: "Cursor",
     fileOpenBehavior: "direct",
+    windows: {
+      knownRelativePaths: [
+        ["cursor", "Cursor.exe"],
+        ["cursor", "bin", "cursor.cmd"],
+      ],
+    },
     macos: {
       openMode: "application",
       appName: "Cursor",
@@ -316,6 +334,12 @@ export const LAUNCH_ADAPTERS: LaunchAdapter[] = [
     kind: "editor",
     label: "Sublime Text",
     fileOpenBehavior: "direct",
+    windows: {
+      knownRelativePaths: [
+        ["Sublime Text", "subl.exe"],
+        ["Sublime Text", "sublime_text.exe"],
+      ],
+    },
     macos: {
       openMode: "application",
       appName: "Sublime Text",
@@ -351,6 +375,9 @@ export const LAUNCH_ADAPTERS: LaunchAdapter[] = [
     kind: "editor",
     label: "Zed",
     fileOpenBehavior: "direct",
+    windows: {
+      knownRelativePaths: [["Zed", "zed.exe"]],
+    },
     macos: {
       openMode: "application",
       appName: "Zed",
@@ -383,6 +410,12 @@ export const LAUNCH_ADAPTERS: LaunchAdapter[] = [
     kind: "editor",
     label: "Devin Desktop",
     fileOpenBehavior: "direct",
+    windows: {
+      knownRelativePaths: [
+        ["Windsurf", "Windsurf.exe"],
+        ["Windsurf", "bin", "windsurf.cmd"],
+      ],
+    },
     macos: {
       openMode: "application",
       additionalAppNames: ["Windsurf"],
@@ -522,6 +555,9 @@ export const LAUNCH_ADAPTERS: LaunchAdapter[] = [
     kind: "editor",
     label: "Antigravity",
     fileOpenBehavior: "direct",
+    windows: {
+      knownRelativePaths: [["Antigravity", "Antigravity.exe"]],
+    },
     macos: {
       openMode: "application",
       appName: "Antigravity",

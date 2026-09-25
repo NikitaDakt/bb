@@ -25,6 +25,7 @@ const ELECTRON_STARTUP_TIMEOUT_MS = 15_000;
 const ELECTRON_EXIT_TIMEOUT_MS = 5_000;
 const ELECTRON_POST_READY_SETTLE_MS = 300;
 const ELECTRON_DISPLAY_AVAILABLE =
+  process.platform === "win32" ||
   process.platform === "darwin" ||
   (process.platform === "linux" && process.env.DISPLAY !== undefined);
 

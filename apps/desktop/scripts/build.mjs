@@ -83,6 +83,9 @@ const commonOptions = {
     "process.env.BB_DESKTOP_RELEASE_CHANNEL": JSON.stringify(
       desktopReleaseChannel,
     ),
+    "process.env.BB_DESKTOP_RELEASE_REPOSITORY": JSON.stringify(
+      process.env.BB_DESKTOP_RELEASE_REPOSITORY ?? "get-bb/bb",
+    ),
     "process.env.BB_DESKTOP_VERSION": JSON.stringify(desktopVersion),
   },
   legalComments: "none",

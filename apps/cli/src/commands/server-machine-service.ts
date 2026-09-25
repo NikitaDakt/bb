@@ -1,7 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   bbAppRuntimeVerifyTokens,
   clearOwnBbAppRuntimeFile,
@@ -149,15 +149,35 @@ async function runInstaller(args: {
   output: InstallMachineServiceArgs["installerOutput"];
 }): Promise<boolean> {
   const installer = spawn(
-    "sh",
-    [args.installerPath, "--adopt", "--data-dir", args.dataDir],
-    { stdio: ["ignore", args.output === "stderr" ? 2 : "inherit", "inherit"] },
+    process.platform === "win32" ? "powershell.exe" : "sh",
+    process.platform === "win32"
+      ? [
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          args.installerPath,
+          "-Adopt",
+          "-DataDir",
+          args.dataDir,
+        ]
+      : [args.installerPath, "--adopt", "--data-dir", args.dataDir],
+    {
+      stdio: ["ignore", args.output === "stderr" ? 2 : "inherit", "inherit"],
+      windowsHide: true,
+    },
   );
   const exit = await waitForProcessExit(installer);
   return exit.code === 0;
 }
 
 export function formatMachineServiceRemoval(serviceFile: string): string {
+  if (serviceFile.endsWith(".ps1")) {
+    const dataDir = dirname(serviceFile);
+    const installer = join(dataDir, "install-machine.ps1");
+    return `& '${installer.replaceAll("'", "''")}' -Uninstall -DataDir '${dataDir.replaceAll("'", "''")}'`;
+  }
   return serviceFile.endsWith(".plist")
     ? `launchctl bootout gui/$(id -u) '${serviceFile}' && rm '${serviceFile}'`
     : `systemctl --user disable --now ${basename(serviceFile)} && rm '${serviceFile}'`;

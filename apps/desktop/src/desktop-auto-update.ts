@@ -6,7 +6,7 @@ import type {
 } from "electron-updater";
 import type { BbDesktopInfo } from "@bb/desktop-contract";
 import {
-  DESKTOP_AUTO_UPDATE_FEED_CONFIG,
+  createDesktopAutoUpdateFeedConfig,
   type DesktopAutoUpdateFeedConfig,
 } from "./desktop-update-provider.js";
 import {
@@ -287,9 +287,9 @@ export function createDesktopAutoUpdateService(
 
   if (args.enabled) {
     args.updater.setLogger(args.logger);
-    args.updater.setFeedURL(DESKTOP_AUTO_UPDATE_FEED_CONFIG);
+    args.updater.setFeedURL(createDesktopAutoUpdateFeedConfig(args.platform));
     args.updater.setAutoDownload(false);
-    args.updater.setAutoInstallOnAppQuit(true);
+    args.updater.setAutoInstallOnAppQuit(args.platform !== "windows");
     args.updater.setForceDevUpdateConfig(args.forceDevUpdateConfig);
     args.updater.onUpdateAvailable((info) => {
       args.logger.info(
@@ -303,7 +303,7 @@ export function createDesktopAutoUpdateService(
     });
     args.updater.onUpdateDownloaded((event) => {
       args.logger.info(
-        `Desktop auto-update downloaded: ${event.version}; it will install on restart or quit.`,
+        `Desktop auto-update downloaded: ${event.version}; ${args.platform === "windows" ? "use Restart to update after the runtime stops." : "it will install on restart or quit."}`,
       );
       applyUpdateDownloaded({
         checkedAt: formatCheckedAt(now),

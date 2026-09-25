@@ -357,35 +357,39 @@ describe("listPathsRecursively", () => {
     );
   });
 
-  it("does not overflow the call stack merging a large subdirectory", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "bb-file-list-"));
-    try {
-      const nested = path.join(root, "many");
-      await fs.mkdir(nested, { recursive: true });
-      const fileCount = 150_000;
-      const batchSize = 500;
-      for (let start = 0; start < fileCount; start += batchSize) {
-        const end = Math.min(start + batchSize, fileCount);
-        await Promise.all(
-          Array.from({ length: end - start }, (_, offset) =>
-            fs.writeFile(path.join(nested, `f${start + offset}.txt`), ""),
-          ),
-        );
+  it(
+    "does not overflow the call stack merging a large subdirectory",
+    async () => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "bb-file-list-"));
+      try {
+        const nested = path.join(root, "many");
+        await fs.mkdir(nested, { recursive: true });
+        const fileCount = 150_000;
+        const batchSize = 2_000;
+        for (let start = 0; start < fileCount; start += batchSize) {
+          const end = Math.min(start + batchSize, fileCount);
+          await Promise.all(
+            Array.from({ length: end - start }, (_, offset) =>
+              fs.writeFile(path.join(nested, `f${start + offset}.txt`), ""),
+            ),
+          );
+        }
+
+        const result = await listPathsRecursively({
+          dir: root,
+          root,
+          includeFiles: true,
+          includeDirectories: false,
+          includeHidden: false,
+          ignoredPaths: new Set<string>(),
+          excludeNames: new Set<string>(),
+        });
+
+        expect(result).toHaveLength(fileCount);
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
       }
-
-      const result = await listPathsRecursively({
-        dir: root,
-        root,
-        includeFiles: true,
-        includeDirectories: false,
-        includeHidden: false,
-        ignoredPaths: new Set<string>(),
-        excludeNames: new Set<string>(),
-      });
-
-      expect(result).toHaveLength(fileCount);
-    } finally {
-      await fs.rm(root, { recursive: true, force: true });
-    }
-  }, 60_000);
+    },
+    process.platform === "win32" ? 240_000 : 60_000,
+  );
 });

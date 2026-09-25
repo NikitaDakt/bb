@@ -202,7 +202,7 @@ export function defaultServerMoveServiceOptions() {
       defaultDetachedProcessSpawner,
     ),
     installBbApp: (tarballPath: string) =>
-      defaultInstallTarball(tarballPath, defaultRunProcess),
+      defaultInstallTarball(tarballPath, defaultRunProcess, process.platform),
     checkGhAuthenticated: defaultGhAuthenticationCheck,
     checkPortAvailable: defaultPortAvailabilityCheck,
     processOps: createNodeVerifiedProcessOps(),

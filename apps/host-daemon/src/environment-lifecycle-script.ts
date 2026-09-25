@@ -14,7 +14,7 @@ import {
 import fs from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import path from "node:path";
-import { WorkspaceError } from "bb-environment-provider-host/git";
+import { runGit, WorkspaceError } from "bb-environment-provider-host/git";
 import { createTerminalOutputLineReader } from "bb-environment-provider-host/terminal-output";
 import {
   createProvisionCancelledError,
@@ -47,6 +47,7 @@ interface BuildLifecycleScriptCommandArgs {
   scriptName: string;
   platform: NodeJS.Platform;
   scriptPath: string;
+  bashPath?: string;
 }
 
 interface RunLifecycleScriptArgs extends RunSetupScriptArgs {
@@ -58,9 +59,31 @@ export function buildLifecycleScriptCommand(
   args: BuildLifecycleScriptCommandArgs,
 ): LifecycleScriptCommand {
   if (args.platform === "win32") {
+    if (args.scriptName.endsWith(".ps1")) {
+      return {
+        command: "powershell.exe",
+        args: [
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          args.scriptPath,
+        ],
+        text: `powershell.exe -File ${args.scriptName}`,
+      };
+    }
+    if (args.bashPath !== undefined) {
+      return {
+        command: args.bashPath,
+        args: [args.scriptPath],
+        text: `bash ${args.scriptName}`,
+      };
+    }
     throw new WorkspaceError(
       "setup_script_failed",
-      `POSIX shell ${args.kind} scripts are not supported on Windows: ${args.scriptName}`,
+      `Install Git for Windows to run ${args.scriptName}, or provide .bb-env-${args.kind}.ps1`,
     );
   }
 
@@ -88,26 +111,58 @@ async function runLifecycleScript(
   args: RunLifecycleScriptArgs,
 ): Promise<{ ran: boolean }> {
   throwIfProvisionAborted(args.signal);
-  const scriptPath = await resolveLifecycleScriptPath(
-    args.workspacePath,
-    args.scriptName,
-  );
+  const nativeScriptPath =
+    process.platform === "win32"
+      ? await resolveLifecycleScriptPath(
+          args.workspacePath,
+          args.scriptName.replace(/\.sh$/u, ".ps1"),
+        )
+      : null;
+  const scriptPath =
+    nativeScriptPath ??
+    (await resolveLifecycleScriptPath(args.workspacePath, args.scriptName));
   if (!scriptPath) {
     return { ran: false };
+  }
+
+  const scriptName = path.basename(scriptPath);
+  let bashPath: string | undefined;
+  if (process.platform === "win32" && nativeScriptPath === null) {
+    try {
+      const git = await runGit(["--exec-path"], {
+        cwd: args.workspacePath,
+        timeoutMs: Math.min(args.timeoutMs, 5_000),
+        shellPath: args.shellPath,
+        signal: args.signal,
+      });
+      const candidate = path.resolve(
+        git.stdout.trim(),
+        "..",
+        "..",
+        "..",
+        "bin",
+        "bash.exe",
+      );
+      await fs.access(candidate);
+      bashPath = candidate;
+    } catch {
+      throwIfProvisionAborted(args.signal);
+    }
   }
 
   throwIfProvisionAborted(args.signal);
   const command = buildLifecycleScriptCommand({
     kind: args.kind,
-    scriptName: args.scriptName,
+    scriptName,
     platform: process.platform,
     scriptPath,
+    bashPath,
   });
   const startedAt = Date.now();
   emitStep({
     onProgress: args.onProgress,
     key: `${args.kind}-started`,
-    text: `Running ${args.scriptName}`,
+    text: `Running ${scriptName}`,
     status: "started",
     startedAt,
   });
@@ -187,7 +242,7 @@ async function runLifecycleScript(
       emitStep({
         onProgress: args.onProgress,
         key: `${args.kind}-cancelled`,
-        text: `${args.scriptName} cancelled`,
+        text: `${scriptName} cancelled`,
         status: "failed",
         startedAt,
         metadata: { durationMs },
@@ -199,7 +254,7 @@ async function runLifecycleScript(
       emitStep({
         onProgress: args.onProgress,
         key: `${args.kind}-failed`,
-        text: `${args.scriptName} failed`,
+        text: `${scriptName} failed`,
         status: "failed",
         startedAt,
         metadata: { durationMs },
@@ -225,7 +280,7 @@ async function runLifecycleScript(
     emitStep({
       onProgress: args.onProgress,
       key: `${args.kind}-completed`,
-      text: `${args.scriptName} finished`,
+      text: `${scriptName} finished`,
       status: "completed",
       startedAt,
       metadata: { durationMs },

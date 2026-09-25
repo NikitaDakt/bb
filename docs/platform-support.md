@@ -33,6 +33,20 @@ Windows support means the Linux stack runs entirely inside WSL2:
 - native Windows PowerShell, CMD, drive-letter paths, and UNC paths are not
   supported product paths
 
+## Native Windows candidate
+
+This development branch adds an experimental native Windows x64 runtime and
+NSIS desktop installer. Its Windows workflow covers native dependencies,
+ConPTY, host services, process cleanup and installer lifecycle. Those checks
+must pass on Windows before this candidate changes the supported-platform list
+above; Linux tests with an injected Windows platform are not that evidence.
+
+Native operation uses Windows Node.js, Git and provider CLIs, local Windows
+paths and PowerShell. Git for Windows supplies Bash only for repositories that
+still use shell setup hooks. Use an isolated data directory during validation;
+installed updates, crash cleanup and the owner's plugins remain acceptance
+gates. See [the candidate plan](../plans/windows-native-2026-09-25.md).
+
 ## Mobile app
 
 [`apps/mobile`](../apps/mobile) is a native phone client for a bb server

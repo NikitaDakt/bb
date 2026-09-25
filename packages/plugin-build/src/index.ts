@@ -21,6 +21,7 @@ export {
 } from "./svg-asset.js";
 
 export {
+  isPathWithinDirectory,
   readPluginPackageJsonFile,
   resolveManifestAssetFile,
   resolveManifestEntryFile,

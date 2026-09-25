@@ -11,6 +11,8 @@ const LAUNCHD_DATA_DIR_PATTERN =
   /<key>BB_DATA_DIR<\/key>\s*<string>([^<]*)<\/string>/u;
 const SYSTEMD_DATA_DIR_PATTERN =
   /^Environment="BB_DATA_DIR=((?:[^"\\]|\\.)*)"\s*$/mu;
+const WINDOWS_COMMAND_PATTERN = /^& ((?:'(?:[^'\r\n]|'')*'[ \t]*)+)\r?$/mu;
+const WINDOWS_WORD_PATTERN = /'((?:[^'\r\n]|'')*)'/gu;
 const XML_ENTITIES: Readonly<Record<string, string>> = {
   "&amp;": "&",
   "&apos;": "'",
@@ -30,6 +32,59 @@ interface ServiceDirectory {
   parseDataDir(content: string): string | null;
   prefix: string;
   suffix: string;
+}
+
+export function parseWindowsMachineService(content: string): {
+  manager: "windows-task" | "windows-run-key";
+  environment: Record<string, string>;
+  programArguments: string[];
+} | null {
+  const manager =
+    /^\$bbServiceManager = '(windows-task|windows-run-key)'\r?$/mu.exec(
+      content,
+    )?.[1];
+  const command = WINDOWS_COMMAND_PATTERN.exec(content)?.[1];
+  if (
+    (manager !== "windows-task" && manager !== "windows-run-key") ||
+    command === undefined
+  ) {
+    return null;
+  }
+  const environment: Record<string, string> = {};
+  for (const match of content.matchAll(
+    /^\$env:([A-Za-z_][A-Za-z0-9_]*)='((?:[^'\r\n]|'')*)'\r?$/gmu,
+  )) {
+    if (match[1] !== undefined && match[2] !== undefined) {
+      environment[match[1]] = match[2].replaceAll("''", "'");
+    }
+  }
+  return {
+    manager,
+    environment,
+    programArguments: Array.from(
+      command.matchAll(WINDOWS_WORD_PATTERN),
+      (match) => (match[1] ?? "").replaceAll("''", "'"),
+    ),
+  };
+}
+
+export function formatWindowsMachineServiceCommand(
+  content: string,
+  programArguments: readonly string[],
+): string {
+  if (
+    !WINDOWS_COMMAND_PATTERN.test(content) ||
+    programArguments.length < 2 ||
+    programArguments.some((value) => /[\r\n]/u.test(value))
+  ) {
+    throw new Error("Invalid Windows machine service command");
+  }
+  const command =
+    "& " +
+    programArguments
+      .map((value) => "'" + value.replaceAll("'", "''") + "'")
+      .join(" ");
+  return content.replace(WINDOWS_COMMAND_PATTERN, () => command);
 }
 
 function parseLaunchdDataDir(content: string): string | null {
@@ -57,6 +112,17 @@ function parseSystemdDataDir(content: string): string | null {
 function serviceDirectories(
   args: FindMachineServiceFileArgs,
 ): ServiceDirectory[] {
+  if (args.platform === "win32") {
+    return [
+      {
+        directory: args.dataDir,
+        parseDataDir: (content) =>
+          parseWindowsMachineService(content)?.environment.BB_DATA_DIR ?? null,
+        prefix: "bb-host-daemon-",
+        suffix: ".ps1",
+      },
+    ];
+  }
   if (args.platform === "darwin") {
     return [
       {

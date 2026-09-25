@@ -766,7 +766,8 @@ package download failed". It
 installs the package under the machine's bb data directory rather than npm's
 system-wide prefix, so enrollment needs neither `sudo` nor a global npm configuration.
 Installed services enable `--auto-update`; remove that flag from the launchd
-plist or systemd user unit and reload the service to opt out. Updates only move
+plist, the systemd user unit, or on Windows the per-enrollment wrapper `.ps1`,
+and reload the service to opt out. Updates only move
 to a newer server protocol, retry failures with a persisted exponential backoff
 from 5 seconds to 5 minutes, and never downgrade a daemon. Settings → Machines
 and `bb machine retry-update <id-or-name>` can bypass the current backoff after
@@ -1744,3 +1745,36 @@ directories are also searched. On macOS, discovery searches Application Support.
 The desktop app's own profile is excluded. See `bb guide browser` for search
 bounds, encryption limitations, and the `import-sources` / `import-cookies`
 commands. No additional BB setting is required to enable discovery.
+
+## Native Windows environment hooks
+
+Native Windows enrollment stores `install-machine.ps1` in its machine data
+directory. Run that script with `-Start`, `-Stop`, `-Restart`, or `-Uninstall`
+and `-DataDir <path>` to manage its scheduled task or per-user Run entry.
+Uninstall stops the verified runtime and preserves user data. `-Adopt -DataDir
+<path>` installs persistence for an existing identity; `bb server
+install-machine-service` selects this installer automatically on Windows.
+Server moves retain and update the PowerShell launcher and its persistence method.
+
+Windows environments prefer `.bb-env-setup.ps1` and `.bb-env-teardown.ps1`
+over their `.sh` counterparts. bb runs PowerShell with `-NoProfile`,
+`-NonInteractive`, and `-File`, with the workspace as its working directory.
+The existing streaming, timeout, cancellation and teardown-failure rules apply.
+A repository containing only `.sh` hooks needs Git for Windows with Bash.
+The WSL launcher is never used for a native Windows hook.
+
+On Windows, workspace cleanup stops registered process trees in the calling
+host worker and daemon. Windows does not expose a reliable working directory
+for arbitrary processes: close separately launched shells/editors if they hold
+workspace files open. Native orphan cleanup remains an acceptance gate; see
+[process cleanup limitations](../packages/process-utils/known-issues.md).
+
+## Desktop release repository
+
+Set `BB_DESKTOP_RELEASE_REPOSITORY=owner/repository` while building a private
+Desktop distribution. It is embedded in the app and used by both the packager
+and runtime update feeds. The default is `get-bb/bb`. Windows uses the
+`desktop-win-latest` or `desktop-win-nightly` release tag, including `latest.yml`
+or `nightly.yml` and `desktop-version-windows.json`. Build artifacts alone do
+not publish that feed. Windows installs downloaded updates through Restart to
+update, after stopping its owned runtime and releasing the installation directory.

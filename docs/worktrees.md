@@ -209,3 +209,17 @@ Modal's stored Dockerfile recipe contains image-build instructions only.
 Restoring a machine filesystem does not rerun `.bb-env-setup.sh`. Setup runs when core first creates an owned environment. Fresh machine clones do not apply `.worktreeinclude`; supply local files and secrets through Machine environment settings.
 
 Thread startup does not validate workspace fingerprints, probe agent authentication, or automatically install agent CLIs.
+
+## Native Windows environment hooks
+
+Windows environments prefer `.bb-env-setup.ps1` and `.bb-env-teardown.ps1`
+over their `.sh` counterparts. bb runs PowerShell with `-NoProfile`,
+`-NonInteractive`, and `-File`, with the workspace as its working directory.
+The existing streaming, timeout, cancellation and teardown-failure rules apply.
+A repository containing only `.sh` hooks needs Git for Windows with Bash.
+The WSL launcher is never used for a native Windows hook.
+
+On Windows, workspace cleanup stops processes launched by bb under that
+workspace and their descendants. Windows does not expose a reliable working
+directory for arbitrary processes: close separately launched shells/editors
+if they hold workspace files open.

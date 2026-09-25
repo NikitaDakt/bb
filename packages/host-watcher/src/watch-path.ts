@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createDebouncedCallbackScheduler } from "@bb/domain";
-import { isPathWithinDirectory } from "@bb/process-utils";
+import { isWatchPathWithinRoot } from "./watch-event-path.js";
 import {
   RootSubscription,
   type ParcelWatcherEventBatch,
@@ -57,7 +57,7 @@ function collectTouchedTargetPaths(
   const touchedPaths = new Set<string>();
   for (const event of events) {
     const candidatePath = resolveEventPath(targetPath, event.path);
-    if (isPathWithinDirectory(targetPath, candidatePath)) {
+    if (isWatchPathWithinRoot(targetPath, candidatePath)) {
       touchedPaths.add(candidatePath);
     }
   }

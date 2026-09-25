@@ -1,5 +1,6 @@
 import { assertEnvironmentPathAvailable } from "../environments/path-admission.js";
 import { z } from "zod";
+import { posix, win32 } from "node:path";
 import {
   createEnvironment,
   type EnvironmentRow,
@@ -59,6 +60,7 @@ interface HandleUpdateEnvironmentDirectoryToolCallArgs {
   input: unknown;
   thread: Thread;
   turnId: string;
+  platform?: NodeJS.Platform;
 }
 
 type ReadyEnvironment = EnvironmentRow & { path: string; status: "ready" };
@@ -86,22 +88,48 @@ function toolCallSuccess(text: string): ToolCallResponse {
   return toolCallTextResponse(true, text);
 }
 
-function normalizeDirectoryPath(path: string): string {
-  const trimmed = path.trim();
+function normalizeDirectoryPath(
+  value: string,
+  platform: NodeJS.Platform,
+): string {
+  const trimmed = value.trim();
+  if (platform === "win32") {
+    const withoutTrailing = trimmed.replace(/[/\\]+$/u, "");
+    if (withoutTrailing === "") return trimmed;
+    if (/^[A-Za-z]:$/.test(withoutTrailing)) {
+      return `${withoutTrailing}\\`;
+    }
+    return withoutTrailing;
+  }
   if (trimmed === "/") {
     return trimmed;
   }
   return trimmed.replace(/\/+$/u, "");
 }
 
-function validateDirectoryPath(path: string): string | null {
-  if (!path.startsWith("/")) {
+function validateDirectoryPath(
+  value: string,
+  platform: NodeJS.Platform,
+): string | null {
+  if (platform === "win32") {
+    if (!win32.isAbsolute(value)) {
+      return "Path must be an absolute path on the current host.";
+    }
+    if (/^[A-Za-z]:[\\/]?$/.test(value)) {
+      return "Path must name a project directory, not the filesystem root.";
+    }
+    if (value.includes("\0")) {
+      return "Path must not contain NUL bytes.";
+    }
+    return null;
+  }
+  if (!posix.isAbsolute(value)) {
     return "Path must be an absolute path on the current host.";
   }
-  if (path === "/") {
+  if (value === "/") {
     return "Path must name a project directory, not the filesystem root.";
   }
-  if (path.includes("\0")) {
+  if (value.includes("\0")) {
     return "Path must not contain NUL bytes.";
   }
   return null;
@@ -268,8 +296,14 @@ export async function handleUpdateEnvironmentDirectoryToolCall(
     );
   }
 
-  const normalizedPath = normalizeDirectoryPath(input.data.path);
-  const pathFailure = validateDirectoryPath(normalizedPath);
+  const normalizedPath = normalizeDirectoryPath(
+    input.data.path,
+    args.platform ?? process.platform,
+  );
+  const pathFailure = validateDirectoryPath(
+    normalizedPath,
+    args.platform ?? process.platform,
+  );
   if (pathFailure) {
     return toolCallFailure(pathFailure);
   }

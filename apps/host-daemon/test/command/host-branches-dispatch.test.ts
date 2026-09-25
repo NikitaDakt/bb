@@ -72,9 +72,16 @@ async function initStaleOriginMainRepo(): Promise<StaleOriginMainRepo> {
     `#!/bin/sh\ntouch ${JSON.stringify(refreshStartedPath)}\nwhile [ ! -f ${JSON.stringify(releaseRefreshPath)} ]; do sleep 0.01; done\nsleep 0.2\nexec git-upload-pack "$@"\n`,
     { encoding: "utf8", mode: 0o755 },
   );
-  await runGitCommand(["config", "remote.origin.uploadpack", uploadPackPath], {
-    cwd: repoPath,
-  });
+  await runGitCommand(
+    [
+      "config",
+      "remote.origin.uploadpack",
+      uploadPackPath.split(path.sep).join("/"),
+    ],
+    {
+      cwd: repoPath,
+    },
+  );
   return { releaseRefreshPath, refreshStartedPath, repoPath };
 }
 
@@ -580,7 +587,11 @@ describe("host.list_branch_options dispatch", () => {
       { encoding: "utf8", mode: 0o755 },
     );
     await runGitCommand(
-      ["config", "remote.origin.uploadpack", uploadPackPath],
+      [
+        "config",
+        "remote.origin.uploadpack",
+        uploadPackPath.split(path.sep).join("/"),
+      ],
       {
         cwd: repoPath,
       },

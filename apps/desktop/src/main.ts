@@ -16,6 +16,7 @@ import {
   session,
   shell,
   webContents as electronWebContents,
+  Tray,
   type Event,
   type IpcMainInvokeEvent,
   type MessageBoxOptions,
@@ -252,6 +253,15 @@ import { parseDesktopSystemConfig } from "./desktop-system-config.js";
 import { ensurePackagedUserShellPath } from "./desktop-shell-path.js";
 import { resolveDesktopReloadShortcut } from "./desktop-reload-shortcut.js";
 import {
+  shouldAutoAttachToForeignRuntime,
+  shouldStopRuntimeOnQuit,
+} from "./desktop-runtime-policy.js";
+import {
+  createDesktopTray,
+  shouldQuitOnWindowAllClosed,
+  type DesktopTrayHandle,
+} from "./desktop-tray.js";
+import {
   createLogTailer,
   createLogLineBuffer,
   createLogViewerViewUrl,
@@ -436,6 +446,7 @@ let localServerMove: DesktopServerMove | null = null;
 let serverMovedWatcher: ServerMovedWatcher | null = null;
 let serverUrlDialogPreloadPath: string | null = null;
 let existingServerDialogPreloadPath: string | null = null;
+let desktopTray: DesktopTrayHandle | null = null;
 
 function resolveDesktopServerUrl(args: ResolveDesktopServerUrlArgs): string {
   const rawPort = args.env.BB_SERVER_PORT?.trim();
@@ -1753,9 +1764,7 @@ async function selectBuiltinServer(): Promise<void> {
   await applyServerTarget();
 }
 
-async function loadServerMovedView(
-  move: DesktopServerMove,
-): Promise<void> {
+async function loadServerMovedView(move: DesktopServerMove): Promise<void> {
   await loadActionView({
     actions: [
       { id: "open-moved-server", label: `Open ${move.toHostName}` },
@@ -2198,7 +2207,10 @@ async function createApplicationWindow(
 
 async function stopOwnedRuntime(): Promise<void> {
   const runtime = currentRuntime;
-  if (runtime === null || runtime.ownership !== "spawned") {
+  if (
+    runtime === null ||
+    !shouldStopRuntimeOnQuit({ ownership: runtime.ownership })
+  ) {
     setCurrentRuntime(null);
     return;
   }
@@ -2208,6 +2220,7 @@ async function stopOwnedRuntime(): Promise<void> {
     await runtime.bbProcess?.stop({
       killSignal: "SIGKILL",
       killTimeoutMs: OWNED_RUNTIME_KILL_TIMEOUT_MS,
+      platform: process.platform,
       signal: "SIGTERM",
       timeoutMs: OWNED_RUNTIME_STOP_TIMEOUT_MS,
     });
@@ -2235,6 +2248,8 @@ async function finishQuit(): Promise<void> {
   stopServerMovedWatcher();
   desktopBrowserBrokerClient?.stop();
   desktopBrowserBroker?.dispose();
+  desktopTray?.destroy();
+  desktopTray = null;
   stopSystemConfigSync();
   connectSessionRenewal?.stop();
   desktopUpdateService?.stop();
@@ -2295,6 +2310,7 @@ function registerDesktopUpdateIpc(): void {
     quitting = true;
     stoppingForQuit = true;
     await finishQuit();
+    if (process.platform === "win32") process.chdir(app.getPath("temp"));
     desktopAutoUpdateService.installUpdate();
   });
   ipcMain.on(
@@ -2429,6 +2445,7 @@ async function spawnOwnedRuntime(
       [APP_SURFACE_ENV_NAME]: APP_SURFACE_DESKTOP,
     },
     logLineLimit: PROCESS_LOG_LINE_LIMIT,
+    platform: process.platform,
     runtime: resolveBbAppProcessRuntime({
       env: process.env,
       isPackaged: app.isPackaged,
@@ -2526,6 +2543,7 @@ async function startOwnedRuntime(
 
 interface InitializeRuntimeArgs {
   bridgePath: string;
+  desktopVersion: string | null;
   serverUrl: string;
   userDataPath: string;
 }
@@ -2561,6 +2579,7 @@ type ExistingServerDecision = "attach" | "quit" | "start-fresh";
 
 async function decideOnExistingServer(
   probe: CompatibleServerProbeResult,
+  desktopVersion: string | null,
 ): Promise<ExistingServerDecision> {
   if (!shouldAskBeforeAttaching()) {
     return "attach";
@@ -2575,6 +2594,9 @@ async function decideOnExistingServer(
     dataDir: probe.dataDir,
     serverUrl: probe.serverUrl,
   });
+  if (shouldAutoAttachToForeignRuntime({ desktopVersion, details })) {
+    return "attach";
+  }
   const choice = await openExistingServerDialog({
     details,
     parentWindow: getFocusedApplicationWindow(),
@@ -2644,7 +2666,10 @@ async function initializeRuntime(args: InitializeRuntimeArgs): Promise<void> {
   });
 
   if (existingProbe.kind === "compatible") {
-    const decision = await decideOnExistingServer(existingProbe);
+    const decision = await decideOnExistingServer(
+      existingProbe,
+      args.desktopVersion,
+    );
     if (decision === "quit") {
       app.quit();
       return;
@@ -2733,7 +2758,7 @@ async function runDesktopApp(): Promise<void> {
   });
   app.on("before-quit", handleBeforeQuit);
   app.on("window-all-closed", () => {
-    if (process.platform !== "darwin") {
+    if (shouldQuitOnWindowAllClosed({ platform: process.platform })) {
       app.quit();
     }
   });
@@ -3170,6 +3195,42 @@ async function runDesktopApp(): Promise<void> {
   });
   installLogViewerIpcHandlers();
 
+  desktopTray = createDesktopTray({
+    deps: {
+      buildMenu: (menuArgs) =>
+        Menu.buildFromTemplate([
+          {
+            click() {
+              menuArgs.onShow();
+            },
+            label: "Open bb",
+          },
+          { type: "separator" },
+          {
+            click() {
+              menuArgs.onQuit();
+            },
+            label: "Quit bb",
+          },
+        ]),
+      createIcon: (imagePath) => new Tray(imagePath),
+    },
+    iconPath,
+    onQuit() {
+      app.quit();
+    },
+    onShow() {
+      if (desktopWindowFactory?.focusFirstWindow() === true) {
+        return;
+      }
+      void createApplicationWindow({
+        initialUrl: currentWindowUrl,
+        stateKey: null,
+      });
+    },
+    platform: process.platform,
+  });
+
   refreshApplicationMenu();
   await loadLoadingView();
   const restoredWindows = await desktopWindowFactory.restoreSavedWindows({
@@ -3184,7 +3245,12 @@ async function runDesktopApp(): Promise<void> {
     localServerMove === null
   ) {
     startServerMovedWatcher();
-    await initializeRuntime({ bridgePath, serverUrl, userDataPath });
+    await initializeRuntime({
+      bridgePath,
+      desktopVersion,
+      serverUrl,
+      userDataPath,
+    });
   } else {
     await applyServerTarget();
     connectServerSync.syncNow().catch(() => {});

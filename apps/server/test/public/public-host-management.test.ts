@@ -63,113 +63,126 @@ function requestJoinCode(app: {
 }
 
 describe("public host management", () => {
-  it("reconnects a machine by re-enrolling it, replacing access only when the installer runs", async () => {
-    await withTestHarness(async (harness) => {
-      const host = seedHost(harness.deps, { id: "host_reconnect" });
-      harness.db
-        .update(hosts)
-        .set({
-          serverAccessProviderId: "relay",
-          serverAccessGrantId: host.id,
-        })
-        .where(eq(hosts.id, host.id))
-        .run();
-      let accessToken = "old-access";
-      const release = vi.fn(async () => {
-        accessToken = "new-access";
-      });
-      const provider = {
-        id: "relay",
-        displayName: "Relay",
-        description: "Test relay",
-        availability: () => ({ status: "available" as const }),
-        acquire: async () => ({
-          id: host.id,
-          serverUrl: "https://relay.example.com",
-          headers: { "x-access-token": accessToken },
-        }),
-        release,
-      };
-      setServerAccessBridge({
-        list: () => [{ pluginId: "test", provider }],
-        invoke: async (_id, run) => run(),
-      });
-      const session = seedSession(harness.deps, host.id);
-      harness.hub.registerDaemon(session.id, host.id, {
-        close: vi.fn(),
-        send: vi.fn(),
-      });
-      const reconnect = () =>
-        harness.app.request(`${API}/hosts/${host.id}/reconnect-commands`, {
-          method: "POST",
+  it.each(["sh", "ps1"] as const)(
+    "reconnects a machine with install.%s, replacing access only when the installer runs",
+    async (extension) => {
+      await withTestHarness(async (harness) => {
+        const host = seedHost(harness.deps, { id: "host_reconnect" });
+        harness.db
+          .update(hosts)
+          .set({
+            serverAccessProviderId: "relay",
+            serverAccessGrantId: host.id,
+          })
+          .where(eq(hosts.id, host.id))
+          .run();
+        let accessToken = "old-access";
+        const release = vi.fn(async () => {
+          accessToken = "new-access";
         });
+        const provider = {
+          id: "relay",
+          displayName: "Relay",
+          description: "Test relay",
+          availability: () => ({ status: "available" as const }),
+          acquire: async () => ({
+            id: host.id,
+            serverUrl: "https://relay.example.com",
+            headers: { "x-access-token": accessToken },
+          }),
+          release,
+        };
+        setServerAccessBridge({
+          list: () => [{ pluginId: "test", provider }],
+          invoke: async (_id, run) => run(),
+        });
+        const session = seedSession(harness.deps, host.id);
+        harness.hub.registerDaemon(session.id, host.id, {
+          close: vi.fn(),
+          send: vi.fn(),
+        });
+        const reconnect = () =>
+          harness.app.request(`${API}/hosts/${host.id}/reconnect-commands`, {
+            method: "POST",
+          });
 
-      const refused = await reconnect();
-      expect(refused.status).toBe(409);
-      expect(await readJson(refused)).toMatchObject({
-        code: "machine_reconnect_not_needed",
-      });
-      harness.hub.unregisterDaemon(session.id);
+        const refused = await reconnect();
+        expect(refused.status).toBe(409);
+        expect(await readJson(refused)).toMatchObject({
+          code: "machine_reconnect_not_needed",
+        });
+        harness.hub.unregisterDaemon(session.id);
 
-      const stale = await reconnect();
-      expect(stale.status).toBe(201);
-      const response = await reconnect();
-      expect(response.status).toBe(201);
-      const prepared = (await readJson(response)) as {
-        command: string;
-        expiresAt: number;
-        hostId: string;
-      };
-      expect(prepared).toMatchObject({ hostId: host.id });
-      expect(prepared.command).toContain("https://relay.example.com/install.sh");
-      expect(release).not.toHaveBeenCalled();
-      const credentialOf = (command: string) =>
-        /X-BB-Enrollment: ([^']+)/u.exec(command)?.[1] ?? "";
-      const credential = credentialOf(prepared.command);
-      expect(credential).toMatch(/^bbde_/u);
+        const stale = await reconnect();
+        expect(stale.status).toBe(201);
+        const response = await reconnect();
+        expect(response.status).toBe(201);
+        const prepared = (await readJson(response)) as {
+          command: string;
+          powershellCommand: string;
+          expiresAt: number;
+          hostId: string;
+        };
+        expect(prepared).toMatchObject({ hostId: host.id });
+        expect(prepared.command).toContain(
+          "https://relay.example.com/install.sh",
+        );
+        expect(prepared.powershellCommand).toContain(
+          "https://relay.example.com/install.ps1",
+        );
+        expect(release).not.toHaveBeenCalled();
+        const credentialOf = (command: string) =>
+          /X-BB-Enrollment: ([^']+)/u.exec(command)?.[1] ?? "";
+        const credential = credentialOf(prepared.command);
+        expect(credential).toMatch(/^bbde_/u);
 
-      const superseded = await harness.app.request("/install.sh", {
-        headers: {
-          "X-BB-Enrollment": credentialOf(
-            ((await readJson(stale)) as { command: string }).command,
-          ),
-        },
-      });
-      expect(superseded.status).toBe(403);
-      expect(release).not.toHaveBeenCalled();
+        const superseded = await harness.app.request(`/install.${extension}`, {
+          headers: {
+            "X-BB-Enrollment": credentialOf(
+              ((await readJson(stale)) as { command: string }).command,
+            ),
+          },
+        });
+        expect(superseded.status).toBe(403);
+        expect(release).not.toHaveBeenCalled();
 
-      const installer = await harness.app.request("/install.sh", {
-        headers: { "X-BB-Enrollment": credential },
-      });
-      expect(installer.status).toBe(200);
-      const script = await installer.text();
-      expect(script).toContain("--bootstrap-env BB_ENROLLMENT");
-      expect(script).toContain('"reconnect":true');
-      expect(script).toContain(`"dataDir":"/tmp/bb-host-data/${host.id}"`);
-      expect(script).toContain("new-access");
-      expect(script).not.toContain("old-access");
-      expect(release).toHaveBeenCalledOnce();
+        const installer = await harness.app.request(`/install.${extension}`, {
+          headers: { "X-BB-Enrollment": credential },
+        });
+        expect(installer.status).toBe(200);
+        const script = await installer.text();
+        expect(script).toContain(
+          extension === "sh"
+            ? "--bootstrap-env BB_ENROLLMENT"
+            : "-BootstrapEnv BB_ENROLLMENT",
+        );
+        expect(script).toContain('"reconnect":true');
+        expect(script).toContain(`"dataDir":"/tmp/bb-host-data/${host.id}"`);
+        expect(script).toContain("new-access");
+        expect(script).not.toContain("old-access");
+        expect(release).toHaveBeenCalledOnce();
 
-      const enrolled = await harness.app.request("/internal/hosts/enroll", {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${credential}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ hostId: host.id, hostName: "renamed-by-os" }),
+        const enrolled = await harness.app.request("/internal/hosts/enroll", {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${credential}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ hostId: host.id, hostName: "renamed-by-os" }),
+        });
+        expect(enrolled.status).toBe(201);
+        expect(await readJson(enrolled)).toMatchObject({ hostId: host.id });
+        expect(getHost(harness.db, host.id)).toMatchObject({
+          name: host.name,
+          destroyedAt: null,
+        });
+        const reused = await harness.app.request(`/install.${extension}`, {
+          headers: { "X-BB-Enrollment": credential },
+        });
+        expect(reused.status).toBe(403);
       });
-      expect(enrolled.status).toBe(201);
-      expect(await readJson(enrolled)).toMatchObject({ hostId: host.id });
-      expect(getHost(harness.db, host.id)).toMatchObject({
-        name: host.name,
-        destroyedAt: null,
-      });
-      const reused = await harness.app.request("/install.sh", {
-        headers: { "X-BB-Enrollment": credential },
-      });
-      expect(reused.status).toBe(403);
-    });
-  });
+    },
+  );
 
   it("refuses to reconnect the server's own machine or a machine that is not active", async () => {
     await withTestHarness(async (harness) => {

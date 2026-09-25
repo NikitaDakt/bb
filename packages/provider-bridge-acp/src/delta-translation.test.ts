@@ -2008,6 +2008,41 @@ describe("acp delta translation (raw payloads and real results)", () => {
     });
   });
 
+  it("resolves a relative location against a Windows-shaped session cwd", () => {
+    const translator = createAcpDeltaTranslator({
+      cwd: "C:\\workspace\\app",
+    });
+    const assembler = createDeltaAssembler({
+      providerId: "acp",
+      entropyPrefix: ENTROPY,
+      textDeltaFlushMs: 0,
+    });
+    const translate = (event: ProviderRuntimeEvent) =>
+      assembler.assemble({
+        threadId: THREAD_ID,
+        deltas: translator.translateAcpEvent(event, { threadId: THREAD_ID }),
+      });
+    translate(turnStartedEvent());
+
+    expect(
+      translate(
+        updateEvent({
+          sessionUpdate: "tool_call",
+          toolCallId: "read-rel-win",
+          title: "Read `README.md`",
+          kind: "read",
+          status: "completed",
+          locations: [{ path: "README.md" }],
+        }),
+      )[0],
+    ).toMatchObject({
+      item: {
+        type: "fileRead",
+        path: "C:\\workspace\\app\\README.md",
+      },
+    });
+  });
+
   it("names a generic row by the unstable tool name", () => {
     const events = startedHarness().translate(
       updateEvent({

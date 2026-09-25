@@ -7,7 +7,7 @@ import {
   deleteMachineEnvironmentVariable,
 } from "../services/machines/environment-storage.js";
 import { getGateAuthKind } from "../request-context.js";
-import path from "node:path";
+import { joinHostPath } from "../services/hosts/host-paths.js";
 import {
   countProjectSources,
   findOrCreateProjectByLocalPathSource,
@@ -689,7 +689,7 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
       {
         hostId: target.hostId,
         ifNoneMatch: context.req.header("if-none-match"),
-        path: path.join(target.path, filePath.relativePath),
+        path: joinHostPath(target.path, filePath.relativePath),
         rootPath: target.path,
       },
       (result) =>
