@@ -432,7 +432,7 @@ describe("external plugin scaffold types", () => {
   it("installs the packed testing runtimes and executes scaffold backend and frontend tests", async () => {
     const packedListing = (
       await execFileAsync("tar", ["-tzf", tarball])
-    ).stdout.split("\n");
+    ).stdout.split(/\r?\n/u);
     expect(packedListing).toContain("package/dist/testing/index.js");
     expect(packedListing).toContain("package/dist/testing/app.js");
     expect(packedListing).toContain(

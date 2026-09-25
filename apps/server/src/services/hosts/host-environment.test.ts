@@ -9,7 +9,7 @@ import {
 } from "@bb/db";
 import { mkdtemp, writeFile, mkdir, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { resolveHostEnvironment } from "./host-environment.js";
 import { replaceMachineEnvironment } from "../machines/environment-settings.js";
@@ -49,7 +49,15 @@ if [ "$1" = auth ]; then printf 'test-gh-secret\\n'; else printf '{"login":"octo
 `,
       { mode: 0o700 },
     );
-    vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
+    if (process.platform === "win32") {
+      await writeFile(
+        join(bin, "gh.cmd"),
+        '@echo off\r\nif "%1"=="auth" (echo test-gh-secret) else (echo {"login":"octocat","id":123,"email":null})\r\n',
+      );
+    }
+    const searchPath = `${bin}${delimiter}${process.env.PATH}`;
+    vi.stubEnv("PATH", searchPath);
+    if (process.platform === "win32") vi.stubEnv("Path", searchPath);
     const deps = { db, config: { dataDir } };
     expect(
       await resolveHostEnvironment(deps, {

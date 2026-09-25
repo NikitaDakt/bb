@@ -38,6 +38,16 @@ fi
 printf '  %s  %s\\n' '●' 'bb machine is ready'
 `;
 
+const FAKE_INSTALLER_PS1 = `param([switch]$Adopt, [string]$DataDir)
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+[Console]::WriteLine("args -Adopt -DataDir $DataDir")
+if ($env:FAKE_INSTALLER_FAIL -eq '1') {
+  [Console]::Error.WriteLine('  ✗  Node.js 20.18.1 is too old; bb-app requires Node.js 22.19 or newer.')
+  exit 1
+}
+[Console]::WriteLine('  ●  bb machine is ready')
+`;
+
 afterEach(async () => {
   await Promise.all(
     tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })),
@@ -51,8 +61,16 @@ async function createTempDir(): Promise<string> {
 }
 
 async function writeFakeInstaller(dir: string): Promise<string> {
-  const installerPath = join(dir, "install-machine.sh");
-  await writeFile(installerPath, FAKE_INSTALLER);
+  const installerPath = join(
+    dir,
+    process.platform === "win32" ? "install-machine.ps1" : "install-machine.sh",
+  );
+  await writeFile(
+    installerPath,
+    process.platform === "win32"
+      ? `\ufeff${FAKE_INSTALLER_PS1}`
+      : FAKE_INSTALLER,
+  );
   return installerPath;
 }
 
@@ -103,8 +121,8 @@ describe("runMachineInstaller", () => {
       }),
     ).resolves.toEqual({ ok: true });
 
-    expect(await readFile(logPath, "utf8")).toBe(
-      `args --adopt --data-dir ${join(dir, "data")}\n  ●  bb machine is ready\n`,
+    expect((await readFile(logPath, "utf8")).replaceAll("\r\n", "\n")).toBe(
+      `args ${process.platform === "win32" ? "-Adopt -DataDir" : "--adopt --data-dir"} ${join(dir, "data")}\n  ●  bb machine is ready\n`,
     );
   });
 
@@ -129,10 +147,17 @@ describe("runMachineInstaller", () => {
 
   it("describes an installer that exits without a failure line", async () => {
     const dir = await createTempDir();
-    const installerPath = join(dir, "install-machine.sh");
+    const installerPath = join(
+      dir,
+      process.platform === "win32"
+        ? "install-machine.ps1"
+        : "install-machine.sh",
+    );
     await writeFile(
       installerPath,
-      "printf '%s\\n' 'npm ERR! network'\nexit 3\n",
+      process.platform === "win32"
+        ? "[Console]::WriteLine('npm ERR! network')\nexit 3\n"
+        : "printf '%s\\n' 'npm ERR! network'\nexit 3\n",
     );
 
     await expect(

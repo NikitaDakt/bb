@@ -105,7 +105,7 @@ describe("codex app-server connection", () => {
       await connection.kill();
       await expect(exited.promise).resolves.toMatchObject({
         code: null,
-        signal: "SIGKILL",
+        signal: process.platform === "win32" ? "SIGTERM" : "SIGKILL",
       });
     } finally {
       await connection.kill();
@@ -178,11 +178,11 @@ describe("codex app-server connection", () => {
     try {
       await ready.promise;
       await connection.kill();
-      await expect(exited.promise).resolves.toMatchObject({
-        code: 0,
-        signal: null,
-        stderrTail: "terminated cleanly",
-      });
+      await expect(exited.promise).resolves.toMatchObject(
+        process.platform === "win32"
+          ? { code: null, signal: "SIGTERM", stderrTail: "" }
+          : { code: 0, signal: null, stderrTail: "terminated cleanly" },
+      );
     } finally {
       await connection.kill();
     }
@@ -197,6 +197,7 @@ describe("codex app-server connection", () => {
     })}\n`;
     const descendantScript = [
       `const line = ${JSON.stringify(lateResponseLine)};`,
+      'process.stdout.write("", () => process.send("ready"));',
       "setTimeout(() => process.stdout.write(line, () => process.exit(0)), 250);",
     ].join("");
     const childScript = [
@@ -204,8 +205,8 @@ describe("codex app-server connection", () => {
       'process.stdin.once("data", () => {',
       'process.stderr.write("fixture stderr\\n");',
       `process.stdout.write(${JSON.stringify(childRequestLine())}, () => {`,
-      `spawn(process.execPath, ["-e", ${JSON.stringify(descendantScript)}], { stdio: ["ignore", 1, "ignore"] });`,
-      "process.exit(7);",
+      `const descendant = spawn(process.execPath, ["-e", ${JSON.stringify(descendantScript)}], { stdio: ["ignore", 1, "ignore", "ipc"] });`,
+      'descendant.once("message", () => process.exit(7));',
       "});",
       "});",
     ].join("");
@@ -287,6 +288,7 @@ describe("codex app-server connection", () => {
       args: [
         "-e",
         [
+          "process.stdin.destroy();",
           'require("node:fs").closeSync(0);',
           `process.stdout.write(${JSON.stringify(
             `${JSON.stringify({ jsonrpc: "2.0", method: "ready" })}\n`,
@@ -332,7 +334,7 @@ describe("codex app-server connection", () => {
       await expect(exited.promise).resolves.toMatchObject({
         code: null,
         signal: "SIGKILL",
-        stderrTail: expect.stringMatching(/stdin failed \(EPIPE\)/),
+        stderrTail: expect.stringMatching(/stdin failed \((?:EPIPE|EOF)\)/),
         spawnFailed: false,
       });
     } finally {

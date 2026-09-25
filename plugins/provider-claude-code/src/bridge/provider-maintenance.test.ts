@@ -72,7 +72,9 @@ describe("Claude Code provider maintenance", () => {
     );
     expect(run).toMatchObject({
       available: true,
-      command: { command: "sh" },
+      command: {
+        command: process.platform === "win32" ? "powershell.exe" : "sh",
+      },
       verification: { kind: "installed" },
     });
     expect(run.available && run.command.args).toHaveLength(2);

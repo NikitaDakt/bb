@@ -148,6 +148,7 @@ describe("Codex credential health and usage", () => {
       { mode: 0o755 },
     );
     vi.stubEnv("HOME", homeDir);
+    vi.stubEnv("USERPROFILE", homeDir);
     vi.stubEnv("CODEX_HOME", "");
     vi.stubEnv("PATH", `${binDir}${path.delimiter}${process.env.PATH ?? ""}`);
   });

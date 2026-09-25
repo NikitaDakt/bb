@@ -1,6 +1,6 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { experimental_nativeRootsResolveOutputSchema } from "@get-bb/plugin-sdk/host";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { resolvePiNativeRoots } from "./native-roots.js";
@@ -46,7 +46,7 @@ it("answers empty without a settings file or with an unreadable one", async () =
 it("resolves plain skill entries against home, the agent dir, or as given, and drops the rest", async () => {
   writeSettings(join(homeDir, ".pi", "agent"), {
     skills: [
-      "/opt/team-skills",
+      resolve("/opt/team-skills"),
       "~/shared/skills",
       "local-skills/",
       "team/one-skill/SKILL.md",
@@ -56,12 +56,12 @@ it("resolves plain skill entries against home, the agent dir, or as given, and d
       "git:github.com/acme/skills",
       "https://example.invalid/skills",
       "  ",
-      "/opt/team-skills",
+      resolve("/opt/team-skills"),
     ],
   });
   await expect(resolvedSkillPaths({})).resolves.toEqual(
     [
-      "/opt/team-skills",
+      resolve("/opt/team-skills"),
       join(homeDir, ".pi", "agent", "local-skills"),
       join(homeDir, "shared", "skills"),
     ].sort(),
@@ -91,10 +91,10 @@ it("never answers a root the contract would refuse", async () => {
   });
   await expect(resolvedSkillPaths({})).resolves.toEqual(
     [
-      "/etc/skills",
-      "/opt/skills",
+      resolve("/etc/skills"),
+      resolve("/opt/skills"),
       join(homeDir, ".pi", "agent", "escape"),
-      "/srv/skills",
+      resolve("/srv/skills"),
       join(homeDir, "team-skills"),
     ].sort(),
   );

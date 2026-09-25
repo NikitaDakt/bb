@@ -100,16 +100,26 @@ async function pushRemoteMainCommit(remotePath: string) {
 async function initSshRemoteRepo() {
   const repoPath = await initReadGitBlobRepo();
   const sshLogPath = path.join(repoPath, "ssh-invocations.log");
-  const sshScriptPath = path.join(repoPath, "recording-ssh.sh");
+  const sshScriptPath = path.join(repoPath, "recording-ssh.cjs");
   await fs.writeFile(
     sshScriptPath,
-    `#!/bin/sh\nprintf '%s\\n' "$@" >> ${JSON.stringify(sshLogPath)}\nprintf 'GIT_TERMINAL_PROMPT=%s\\n' "\${GIT_TERMINAL_PROMPT-unset}" >> ${JSON.stringify(sshLogPath)}\nexit 255\n`,
+    `const fs = require("node:fs");
+fs.appendFileSync(${JSON.stringify(sshLogPath)}, process.argv.slice(2).join("\\n") + "\\nGIT_TERMINAL_PROMPT=" + (process.env.GIT_TERMINAL_PROMPT ?? "unset") + "\\n");
+process.exit(255);
+`,
     { encoding: "utf8", mode: 0o755 },
   );
   await runGit(["remote", "add", "origin", "ssh://git.invalid/repo.git"], {
     cwd: repoPath,
   });
-  await runGit(["config", "core.sshCommand", sshScriptPath], { cwd: repoPath });
+  await runGit(
+    [
+      "config",
+      "core.sshCommand",
+      `"${process.execPath.replaceAll("\\", "/")}" "${sshScriptPath.replaceAll("\\", "/")}"`,
+    ],
+    { cwd: repoPath },
+  );
   return { repoPath, sshLogPath };
 }
 

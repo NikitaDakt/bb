@@ -493,6 +493,9 @@ function Install-RunKeyPersistence {
 
 function Invoke-ServiceLifecycle {
   param([string]$Directory, [string]$MachineId, [string]$ServerUrl, [switch]$StopOnly)
+  $resolvedDirectory = Invoke-NodeScript 'process.stdout.write(require("node:fs").realpathSync.native(process.argv[2]));' @($Directory)
+  if ($resolvedDirectory.ExitCode -ne 0) { Exit-Fail 'Could not resolve the installed machine data directory.' }
+  $Directory = $resolvedDirectory.Output
   $task = "bb-host-daemon-$MachineId"
   $wrapper = Join-Path $Directory "$task.ps1"
   $portFile = Join-Path $Directory 'host-daemon-port'
@@ -653,7 +656,7 @@ if (-not $Adopt) {
 }
 New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $dataDir 'logs') -Force | Out-Null
-$canonicalResult = Invoke-NodeScript 'const fs = require("node:fs"); process.stdout.write(fs.realpathSync(process.argv[2]));' @($dataDir)
+$canonicalResult = Invoke-NodeScript 'const fs = require("node:fs"); process.stdout.write(fs.realpathSync.native(process.argv[2]));' @($dataDir)
 if ($canonicalResult.ExitCode -ne 0) {
   Exit-Fail "Could not resolve the data directory $dataDir."
 }

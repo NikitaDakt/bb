@@ -68,12 +68,16 @@ export function selectAdoptableWorktrees(args: {
 }
 
 function isInside(root: string, candidate: string): boolean {
-  return candidate === root || candidate.startsWith(`${root}/`);
+  const suffix = relative(root, candidate);
+  return (
+    suffix !== ".." && !suffix.startsWith(`..${sep}`) && !isAbsolute(suffix)
+  );
 }
 
 export function findWorktreeEntry(
   entries: readonly GitWorktreeEntry[],
   path: string,
 ): GitWorktreeEntry | null {
-  return entries.find((entry) => entry.path === path) ?? null;
+  return entries.find((entry) => relative(entry.path, path) === "") ?? null;
 }
+import { isAbsolute, relative, sep } from "node:path";

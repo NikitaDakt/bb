@@ -67,7 +67,7 @@ describe("machine environment settings", () => {
         await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" });
         expect(
           (await stat(join(harness.config.dataDir, "machine-environment-key")))
-            .mode & 0o777,
+            .mode & (process.platform === "win32" ? 0o600 : 0o777),
         ).toBe(0o600);
         expect(
           JSON.stringify(harness.db.select().from(environmentVariables).all()),

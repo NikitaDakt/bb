@@ -17,7 +17,7 @@ async function listTarballEntries(archivePath: string): Promise<string[]> {
     await execFileAsync("tar", ["-tzf", basename(archivePath)], {
       cwd: dirname(archivePath),
     })
-  ).stdout.split("\n");
+  ).stdout.split(/\r?\n/u);
 }
 async function readTarballEntry(
   archivePath: string,
@@ -189,7 +189,7 @@ describe("bb-app artifact service (desktop packaging)", () => {
       expect(artifact.size).toBeGreaterThan(0);
       expect(
         (await execFileAsync("tar", ["-tzf", artifact.path])).stdout.split(
-          "\n",
+          /\r?\n/u,
         ),
       ).toContain("package/host-daemon/dist/daemon-bundle.mjs");
     },

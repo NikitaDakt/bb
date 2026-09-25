@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
+import * as pluginBuild from "@bb/plugin-build";
 import { vi } from "vitest";
 
 const FAKE_NPM = `#!/usr/bin/env node
@@ -70,8 +71,13 @@ export async function installFakeNpm(workDir: string): Promise<string> {
   await mkdir(binDir, { recursive: true });
   await writeFile(join(binDir, "npm"), FAKE_NPM, { mode: 0o755 });
   if (process.platform === "win32") {
+    vi.spyOn(pluginBuild, "resolveBundledNpmCli").mockReturnValue(
+      join(binDir, "npm"),
+    );
     await writeFile(join(binDir, "npm.cmd"), `@node "%~dp0npm" %*\n`);
   }
-  vi.stubEnv("PATH", `${binDir}${delimiter}${process.env.PATH ?? ""}`);
+  const searchPath = `${binDir}${delimiter}${process.env.PATH ?? ""}`;
+  vi.stubEnv("PATH", searchPath);
+  if (process.platform === "win32") vi.stubEnv("Path", searchPath);
   return binDir;
 }

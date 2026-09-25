@@ -180,7 +180,12 @@ export async function startFakePiBridge(
       );
       harness.restore();
       vi.unstubAllEnvs();
-      rmSync(workspaceDir, { recursive: true, force: true });
+      rmSync(workspaceDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 20,
+        retryDelay: 50,
+      });
     },
   };
   if (options.initialize) {

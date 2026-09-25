@@ -74,8 +74,13 @@ function keepSdkStreamOpen(): void {
   });
 }
 
+const originalGetUid = Object.getOwnPropertyDescriptor(process, "getuid");
+
 function mockProcessUid(uid: number): void {
-  vi.spyOn(process, "getuid").mockReturnValue(uid);
+  Object.defineProperty(process, "getuid", {
+    configurable: true,
+    value: () => uid,
+  });
 }
 
 function waitForAsyncWork(): Promise<void> {
@@ -96,6 +101,9 @@ describe("SdkSession", () => {
   });
 
   afterEach(() => {
+    if (originalGetUid)
+      Object.defineProperty(process, "getuid", originalGetUid);
+    else Reflect.deleteProperty(process, "getuid");
     vi.restoreAllMocks();
   });
 

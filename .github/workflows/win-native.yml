@@ -20,14 +20,41 @@ concurrency:
 env:
   COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
   CSC_IDENTITY_AUTO_DISCOVERY: "false"
-  BB_DESKTOP_RELEASE_REPOSITORY: ${{ github.repository }}
   GOMEMLIMIT: 3GiB
   NODE_OPTIONS: --max-old-space-size=3072
 
 jobs:
   windows:
+    name: Windows (${{ matrix.group }})
     runs-on: windows-2022
-    timeout-minutes: 90
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - group: desktop
+            filters: --filter=@bb/desktop
+          - group: core
+            filters: >-
+              --filter=@bb/domain --filter=@bb/process-utils --filter=@bb/config
+              --filter=@bb/host-daemon-contract --filter=@bb/host-workspace --filter=@bb/host-watcher
+              --filter=@bb/provider-bridge-protocol --filter=@bb/provider-bridge-acp
+              --filter=@bb/plugin-build --filter=@bb/local-open-targets --filter=bb-app
+              --filter=@bb/templates --filter=bb-plugin-bb-guide --filter=@bb/plugin-registry
+              --filter=@get-bb/plugin-sdk --filter=bb-plugin-environment-git-worktree
+              --filter=bb-plugin-environment-personal-workspace
+          - group: providers
+            filters: >-
+              --filter=@bb/agent-runtime --filter=@bb/provider-parity
+              --filter=bb-plugin-provider-claude-code --filter=bb-plugin-provider-codex
+              --filter=bb-plugin-provider-pi
+          - group: server
+            filters: --filter=@bb/server
+          - group: cli
+            filters: --filter=@bb/cli
+          - group: daemon
+            filters: --filter=@bb/host-daemon
     defaults:
       run:
         shell: pwsh
@@ -36,6 +63,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - name: Setup Bun
+        if: matrix.group == 'providers'
+        uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76
+        with:
+          bun-version: "1.3.14"
       - name: Enable package manager
         run: |
           corepack enable
@@ -53,22 +85,17 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, OSArchitecture
       - name: Typecheck
+        if: matrix.group == 'core'
+        timeout-minutes: 15
         run: pnpm exec turbo run typecheck --concurrency=2 --env-mode=loose --continue=always
       - name: Test Windows runtime and shared contracts
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        timeout-minutes: 20
+        env:
+          TEST_FILTERS: ${{ matrix.filters }}
         run: |
-          $testArguments = @(
-            'exec', 'turbo', 'run', 'test',
-            '--filter=@bb/domain', '--filter=@bb/process-utils', '--filter=@bb/config',
-            '--filter=@bb/host-daemon-contract', '--filter=@bb/host-workspace', '--filter=@bb/host-watcher',
-            '--filter=@bb/host-daemon', '--filter=@bb/server', '--filter=@bb/cli', '--filter=@bb/desktop',
-            '--filter=@bb/provider-bridge-protocol', '--filter=@bb/provider-bridge-acp',
-            '--filter=@bb/plugin-build', '--filter=@bb/local-open-targets', '--filter=bb-app',
-            '--filter=@bb/templates', '--filter=bb-plugin-bb-guide',
-            '--filter=@bb/plugin-registry', '--filter=@get-bb/plugin-sdk', '--filter=@bb/agent-runtime',
-            '--filter=@bb/provider-parity', '--filter=bb-plugin-provider-claude-code',
-            '--filter=bb-plugin-provider-codex', '--filter=bb-plugin-provider-pi',
-            '--filter=bb-plugin-environment-git-worktree', '--filter=bb-plugin-environment-personal-workspace',
-            '--concurrency=1', '--env-mode=loose', '--continue=always',
+          $testArguments = @('exec', 'turbo', 'run', 'test') + ($env:TEST_FILTERS -split '\s+') + @(
+            '--concurrency=1', '--env-mode=loose', '--continue=always', '--log-order=stream',
             '--', '--maxWorkers=1', '--maxConcurrency=2', '--reporter=default', '--reporter=json', '--outputFile=.rt/windows-tests.json'
           )
           Write-Output "Processes before tests: $(@(Get-Process).Count)"
@@ -83,14 +110,20 @@ jobs:
           }
           exit $testExitCode
       - name: Real ConPTY
-        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        if: ${{ !cancelled() && matrix.group == 'desktop' && steps.dependencies.outcome == 'success' }}
+        timeout-minutes: 3
         run: node apps/desktop/scripts/smoke-windows-conpty.mjs
       - name: Build installer
         id: installer
-        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' && github.event_name == 'workflow_dispatch' && inputs.build_installer }}
+        if: ${{ !cancelled() && matrix.group == 'desktop' && steps.dependencies.outcome == 'success' && github.event_name == 'workflow_dispatch' && inputs.build_installer }}
+        timeout-minutes: 25
+        env:
+          BB_DESKTOP_RELEASE_REPOSITORY: ${{ github.repository }}
         run: pnpm exec turbo run desktop:build:win --filter=@bb/desktop --concurrency=2 --env-mode=loose
       - name: Generate Windows version feed
         if: ${{ !cancelled() && steps.installer.outcome == 'success' }}
+        env:
+          BB_DESKTOP_RELEASE_REPOSITORY: ${{ github.repository }}
         run: pnpm --filter @bb/desktop desktop:version-feed
       - name: Packaged app and native dependencies
         if: ${{ !cancelled() && steps.installer.outcome == 'success' }}
@@ -122,7 +155,7 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: windows-evidence-${{ github.run_id }}
+          name: windows-evidence-${{ matrix.group }}-${{ github.run_id }}
           include-hidden-files: true
           path: |
             apps/*/.rt/windows-tests.json
@@ -130,7 +163,7 @@ jobs:
             plugins/*/.rt/windows-tests.json
             .rt/windows-native/**
       - name: Upload installer candidate
-        if: success() && github.event_name == 'workflow_dispatch' && inputs.build_installer
+        if: success() && matrix.group == 'desktop' && github.event_name == 'workflow_dispatch' && inputs.build_installer
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer-${{ github.sha }}

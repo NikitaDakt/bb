@@ -304,7 +304,7 @@ afterEach(() => {
   }
 });
 
-describe("machine install script", () => {
+describe.skipIf(process.platform === "win32")("machine install script", () => {
   it.each([
     { uid: 0, unset: true },
     { uid: 501, unset: true },

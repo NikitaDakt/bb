@@ -88,9 +88,22 @@ export async function runMachineInstaller(
   let exit: InstallerExit;
   try {
     const installer = spawn(
-      "/bin/sh",
-      [args.installerPath, "--adopt", "--data-dir", args.dataDir],
-      { env: args.env, stdio: ["ignore", log.fd, log.fd] },
+      process.platform === "win32" ? "powershell.exe" : "/bin/sh",
+      process.platform === "win32"
+        ? [
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            args.installerPath,
+            "-Adopt",
+            "-DataDir",
+            args.dataDir,
+          ]
+        : [args.installerPath, "--adopt", "--data-dir", args.dataDir],
+      { env: args.env, stdio: ["ignore", log.fd, log.fd], windowsHide: true },
     );
     exit = await new Promise<InstallerExit>((resolvePromise) => {
       installer.once("error", (error) => {

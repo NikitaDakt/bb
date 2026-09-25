@@ -788,6 +788,25 @@ describe("killProcessGroup", () => {
 });
 
 describe("stopProcessGroupLeaderFirst on win32", () => {
+  it("waits for the child exit notification after taskkill removes its PID", async () => {
+    const { child, signals } = createFakeChild(4242, false);
+    await stopProcessGroupLeaderFirst({
+      child,
+      timeoutMs: 100,
+      killGraceMs: 1000,
+      platform: "win32",
+      runWindowsCommand: async () => {
+        setTimeout(() => {
+          Object.defineProperty(child, "exitCode", { value: 1 });
+        }, 20);
+        return okResult("");
+      },
+      isProcessAlive: () => false,
+    });
+    expect(child.exitCode).toBe(1);
+    expect(signals).toEqual([]);
+  });
+
   it("taskkills the tree before killing the leader so descendants stay discoverable", async () => {
     const requests: WindowsCommandRequest[] = [];
     const { child, signals } = createFakeChild(4242, false);
