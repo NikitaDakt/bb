@@ -36,11 +36,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
-      - name: Install dependencies
+      - name: Enable package manager
         run: |
           corepack enable
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          pnpm install --frozen-lockfile
+      - name: Install dependencies
+        timeout-minutes: 15
+        run: |
+          New-Item -ItemType Directory -Force .rt/windows-native | Out-Null
+          pnpm install --frozen-lockfile 2>&1 | Tee-Object -FilePath .rt/windows-native/install.log
+          exit $LASTEXITCODE
       - name: Verify native host
         run: |
           node -e "if(process.platform !== 'win32' || process.arch !== 'x64') process.exit(1); console.log(process.version, process.platform, process.arch)"
@@ -94,13 +99,15 @@ jobs:
           }
           if (Test-Path "$installDir/wbb.exe") { throw 'Uninstaller left the installed application' }
       - name: Upload test evidence
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: windows-evidence-${{ github.run_id }}
           include-hidden-files: true
           path: |
-            **/.rt/windows-tests.json
+            apps/*/.rt/windows-tests.json
+            packages/*/.rt/windows-tests.json
+            plugins/*/.rt/windows-tests.json
             .rt/windows-native/**
       - name: Upload installer candidate
         if: success() && github.event_name == 'workflow_dispatch' && inputs.build_installer
