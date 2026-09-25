@@ -389,7 +389,10 @@ async function stopWindowsProcessTree(args: {
   });
   if (child.pid !== undefined && args.killGraceMs > 0) {
     const reapDeadline = Date.now() + args.killGraceMs;
-    while (args.isAlive(child.pid) && Date.now() < reapDeadline) {
+    while (
+      (!hasChildExited(child) || args.isAlive(child.pid)) &&
+      Date.now() < reapDeadline
+    ) {
       await delay(50);
     }
   }

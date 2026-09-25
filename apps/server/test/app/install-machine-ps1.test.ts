@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -327,7 +328,7 @@ describe.runIf(process.platform === "win32")(
       );
       expect(daemon.bootstrap).toBeNull();
       expect(daemon.args).not.toContain("join");
-      expect(daemon.cwd).toBe(fixture.dataDir);
+      expect(daemon.cwd).toBe(realpathSync.native(fixture.dataDir));
       const launcher = readFileSync(
         join(fixture.dataDir, `bb-host-daemon-${fixture.bootstrap.hostId}.ps1`),
       );

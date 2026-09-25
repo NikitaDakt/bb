@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { dirname, join, posix, win32 } from "node:path";
+import { join, posix, win32 } from "node:path";
 
 export interface DesktopPathContext {
   appPath: string;
@@ -56,15 +56,19 @@ export function resolveDesktopBridgePath(
   return joinPaths(args.paths.appPath, "dist", "bb-app-bridge.mjs");
 }
 
-export function resolveDesktopMachineInstallerPath(bridgePath: string): string {
-  return join(
-    dirname(dirname(bridgePath)),
+export function resolveDesktopMachineInstallerPath(
+  bridgePath: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const paths = platform === "win32" ? win32 : posix;
+  return paths.join(
+    paths.dirname(paths.dirname(bridgePath)),
     "node_modules",
     "bb-app",
     "server",
     "dist",
     "assets",
-    "install-machine.sh",
+    platform === "win32" ? "install-machine.ps1" : "install-machine.sh",
   );
 }
 

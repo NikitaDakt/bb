@@ -695,7 +695,12 @@ export async function listAdoptableWorktrees(args: {
 }): Promise<GitWorktreeEntry[]> {
   const entries = await listGitWorktrees(args);
   return selectAdoptableWorktrees({
-    entries,
+    entries: await Promise.all(
+      entries.map(async (entry) => ({
+        ...entry,
+        path: await realpathOrResolved(entry.path),
+      })),
+    ),
     managedRoot: await realpathOrResolved(args.managedRoot),
   });
 }
@@ -710,7 +715,10 @@ export async function resolveAdoptableWorktree(args: {
   | { status: "failed"; message: string }
 > {
   const adoptable = await listAdoptableWorktrees(args);
-  const entry = findWorktreeEntry(adoptable, await realpathOrResolved(args.path));
+  const entry = findWorktreeEntry(
+    adoptable,
+    await realpathOrResolved(args.path),
+  );
   if (entry === null) {
     return {
       status: "failed",

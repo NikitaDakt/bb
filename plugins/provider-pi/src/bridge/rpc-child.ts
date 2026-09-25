@@ -273,7 +273,9 @@ export class PiRpcChild {
       }, SIGKILL_ESCALATION_MS);
       this.killEscalation.unref?.();
     }
-    this.child.kill("SIGTERM");
+    if ((this.args.platform ?? process.platform) !== "win32") {
+      this.child.kill("SIGTERM");
+    }
   }
 
   respondToExtensionUi(

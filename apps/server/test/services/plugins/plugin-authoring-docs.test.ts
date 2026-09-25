@@ -558,7 +558,7 @@ describe("bb-plugin-authoring skill", () => {
       onError,
       shouldCreateNewSourceFile,
     ) =>
-      file === filename
+      file.replaceAll("\\", "/") === filename.replaceAll("\\", "/")
         ? ts.createSourceFile(filename, source!, languageVersion)
         : readSource(file, languageVersion, onError, shouldCreateNewSourceFile);
     const program = ts.createProgram([filename], options, host);

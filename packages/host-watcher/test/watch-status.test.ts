@@ -82,7 +82,9 @@ async function runGit(
 }
 
 async function makeTempDir(prefix: string): Promise<string> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  const dir = fsSync.realpathSync.native(
+    await fs.mkdtemp(path.join(os.tmpdir(), prefix)),
+  );
   tempDirs.push(dir);
   return dir;
 }

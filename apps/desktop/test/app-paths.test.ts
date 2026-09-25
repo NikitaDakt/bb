@@ -37,9 +37,21 @@ describe("desktop app paths", () => {
     expect(
       resolveDesktopMachineInstallerPath(
         "/Applications/bb.app/Contents/Resources/app.asar.unpacked/dist/bb-app-bridge.mjs",
+        "darwin",
       ),
     ).toBe(
       "/Applications/bb.app/Contents/Resources/app.asar.unpacked/node_modules/bb-app/server/dist/assets/install-machine.sh",
+    );
+  });
+
+  it("resolves the native machine installer beside the Windows bridge", () => {
+    expect(
+      resolveDesktopMachineInstallerPath(
+        "C:\\Program Files\\bb wn\\resources\\app.asar.unpacked\\dist\\bb-app-bridge.mjs",
+        "win32",
+      ),
+    ).toBe(
+      "C:\\Program Files\\bb wn\\resources\\app.asar.unpacked\\node_modules\\bb-app\\server\\dist\\assets\\install-machine.ps1",
     );
   });
 

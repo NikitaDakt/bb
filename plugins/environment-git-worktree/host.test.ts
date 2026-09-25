@@ -1,4 +1,4 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import {
   mkdir,
@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { experimental_createHostEntryHarness } from "@get-bb/plugin-sdk/testing/host";
+import { experimental_spawnPortableProcess } from "@get-bb/plugin-sdk/provider-bridge";
 import { afterEach, describe, expect, it } from "vitest";
 import { createWorktreeHostEntry } from "./host.js";
 
@@ -51,7 +52,9 @@ async function createSourceRepository(repositoryName = "repo"): Promise<{
   temporaryRoots.push(root);
   const sourcePath = join(root, repositoryName);
   const dataDir = join(root, "plugin-data");
-  await execFileAsync("mkdir", ["-p", sourcePath, dataDir]);
+  await Promise.all(
+    [sourcePath, dataDir].map((path) => mkdir(path, { recursive: true })),
+  );
   await git(sourcePath, "init", "--initial-branch=main");
   await writeFile(join(sourcePath, "README.md"), "hello\n");
   await git(sourcePath, "add", ".");
@@ -69,7 +72,9 @@ async function createDetachedSingleBranchRepository(): Promise<{
   const originPath = join(root, "origin");
   const sourcePath = join(root, "repo");
   const dataDir = join(root, "plugin-data");
-  await execFileAsync("mkdir", ["-p", originPath, dataDir]);
+  await Promise.all(
+    [originPath, dataDir].map((path) => mkdir(path, { recursive: true })),
+  );
   await git(originPath, "init", "--initial-branch=main");
   await writeFile(join(originPath, "README.md"), "hello\n");
   await git(originPath, "add", ".");
@@ -533,7 +538,9 @@ describe("worktree host entry", () => {
       }),
     );
     if (created.status !== "created") throw new Error(created.message);
-    const lingering = spawn("sleep", ["300"], {
+    const lingering = experimental_spawnPortableProcess({
+      command: process.execPath,
+      args: ["-e", "setInterval(() => {}, 1000)"],
       cwd: created.path,
       detached: true,
       stdio: "ignore",
