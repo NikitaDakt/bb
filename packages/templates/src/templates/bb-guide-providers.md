@@ -114,6 +114,8 @@ appears automatically. Discover and select one with:
   bb provider models acp-opencode --environment "$BB_ENVIRONMENT_ID"
   bb thread spawn --provider acp-opencode --model <provider/model>
 
+In Windows PowerShell, pass `--environment $env:BB_ENVIRONMENT_ID`.
+
 bb applies the selected model to the ACP session before the first prompt.
 
 OpenCode Go quotas appear in Provider usage for the selected machine after

@@ -1,4 +1,5 @@
 import { operationEnvironment } from "../operation-environment.js";
+import { execFile } from "node:child_process";
 import { accessSync, chmodSync, constants, existsSync } from "node:fs";
 import { access, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -10,7 +11,9 @@ import type { HostDaemonDaemonWsMessage } from "@bb/host-daemon-contract";
 import { HOST_DAEMON_TERMINAL_EXIT_RETENTION_MS } from "@bb/host-daemon-contract/protocol";
 import {
   killProcessGroup,
+  registerSweepRootProcess,
   sanitizeInheritedChildProcessEnv,
+  unregisterSweepRootProcess,
 } from "@bb/process-utils";
 import { displayWidth, truncateToWidth } from "@bb/text-utils";
 import type { HostDaemonServerTerminalMessage } from "../server-connection-support.js";
@@ -27,6 +30,8 @@ const DEFAULT_OUTPUT_BATCH_DELAY_MS = 4;
 const DEFAULT_TERMINAL_CLOSE_GRACE_PERIOD_MS = 2_000;
 const DEFAULT_MAX_EXITED_TERMINALS = 32;
 const DEFAULT_MAX_EXITED_SCROLLBACK_BYTES = 16 * 1024 * 1024;
+const TERMINAL_SWEEP_REGISTER_RETRY_MS = 500;
+const TERMINAL_SWEEP_REGISTER_RETRIES = 6;
 const PRIMARY_DEVICE_ATTRIBUTES_QUERY_PATTERN = /\u001b\[(?:0)?c/g;
 const PRIMARY_DEVICE_ATTRIBUTES_RESPONSE = "\u001b[?1;2c";
 const MAX_PRIMARY_DEVICE_ATTRIBUTES_REPLIES_PER_CHUNK = 8;
@@ -50,6 +55,7 @@ export interface TerminalPtyExit {
 }
 
 export interface TerminalPtyProcess {
+  readonly pid?: number;
   dispose(): void;
   kill(signal?: NodeJS.Signals): void;
   onData(listener: (data: string) => void): TerminalPtyDisposable;
@@ -73,10 +79,22 @@ export interface TerminalPtyAdapter {
 }
 
 export type ResolveTerminalShell = () => Promise<string>;
-type TerminalOpenMessage = Extract<
+export type TerminalOpenMessage = Extract<
   HostDaemonServerTerminalMessage,
   { type: "terminal.open" }
 >;
+
+export interface ResolveDefaultTerminalShellArgs {
+  env?: NodeJS.ProcessEnv;
+  locateOnPath?: (fileName: string) => Promise<string | null>;
+  pathIsExecutable?: (filePath: string) => Promise<boolean>;
+  platform?: NodeJS.Platform;
+}
+
+export interface TerminalSpawnArgs {
+  args: string[];
+  file: string;
+}
 type TerminalAttachMessage = Extract<
   HostDaemonServerTerminalMessage,
   { type: "terminal.attach" }
@@ -114,6 +132,8 @@ interface ExitedTerminalSession {
 interface TerminalSession {
   closeReason: TerminalSessionCloseReason | null;
   closeTimeout: ReturnType<typeof setTimeout> | null;
+  sweepPid: number | null;
+  sweepTimer: ReturnType<typeof setTimeout> | null;
   cols: number;
   disposables: TerminalPtyDisposable[];
   environmentId: string | null;
@@ -158,7 +178,8 @@ interface ShutdownTerminalArgs {
   terminalId: string;
 }
 
-interface BuildTerminalEnvArgs {
+export interface BuildTerminalEnvArgs {
+  platform?: NodeJS.Platform;
   shellEnv: NodeJS.ProcessEnv;
   terminalId: string;
 }
@@ -222,6 +243,9 @@ const nodePtyAdapter: TerminalPtyAdapter = {
       rows: args.rows,
     });
     return {
+      get pid() {
+        return pty.pid;
+      },
       dispose: () => disposeNodePty(pty),
       kill: (signal) =>
         killProcessGroup({
@@ -343,16 +367,30 @@ function isNonEmptyString(value: string | undefined): value is string {
   return value !== undefined && value.length > 0;
 }
 
-async function resolveDefaultTerminalShell(): Promise<string> {
-  const candidates = [
-    process.env.SHELL,
-    "/bin/zsh",
-    "/bin/bash",
-    "/bin/sh",
-  ].filter(isNonEmptyString);
+const WINDOWS_POWERSHELL_EXE = "powershell.exe";
+const WINDOWS_PWSH_EXE = "pwsh.exe";
+const WINDOWS_UTF8_CODE_PAGE_COMMAND = "chcp 65001";
+
+export async function resolveDefaultTerminalShell(
+  args: ResolveDefaultTerminalShellArgs = {},
+): Promise<string> {
+  const platform = args.platform ?? process.platform;
+  const env = args.env ?? process.env;
+  const isExecutable = args.pathIsExecutable ?? pathIsExecutable;
+  if (platform === "win32") {
+    return resolveWindowsTerminalShell({
+      env,
+      locateOnPath: args.locateOnPath ?? defaultLocateWindowsExecutable,
+      pathIsExecutable: isExecutable,
+    });
+  }
+
+  const candidates = [env.SHELL, "/bin/zsh", "/bin/bash", "/bin/sh"].filter(
+    isNonEmptyString,
+  );
 
   for (const candidate of candidates) {
-    if (await pathIsExecutable(candidate)) {
+    if (await isExecutable(candidate)) {
       return candidate;
     }
   }
@@ -360,9 +398,115 @@ async function resolveDefaultTerminalShell(): Promise<string> {
   return "/bin/sh";
 }
 
-function buildTerminalEnv(args: BuildTerminalEnvArgs): NodeJS.ProcessEnv {
-  return {
-    ...sanitizeInheritedChildProcessEnv({ env: process.env }),
+interface ResolveWindowsTerminalShellArgs {
+  env: NodeJS.ProcessEnv;
+  locateOnPath: (fileName: string) => Promise<string | null>;
+  pathIsExecutable: (filePath: string) => Promise<boolean>;
+}
+
+function readWindowsEnvValue(
+  env: NodeJS.ProcessEnv,
+  name: string,
+): string | undefined {
+  const target = name.toLowerCase();
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== undefined && key.toLowerCase() === target) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function normalizeWindowsDir(directory: string): string {
+  const stripped = directory.replace(/\\+$/u, "");
+  return stripped.length > 0 ? stripped : "C:\\Windows";
+}
+
+function defaultLocateWindowsExecutable(
+  fileName: string,
+): Promise<string | null> {
+  return new Promise<string | null>((resolveLocate) => {
+    execFile(
+      "where.exe",
+      [fileName],
+      { timeout: 5_000, windowsHide: true },
+      (error, stdout) => {
+        if (error) {
+          resolveLocate(null);
+          return;
+        }
+        const located =
+          stdout
+            .split(/\r?\n/u)
+            .map((line) => line.trim())
+            .find((line) => line.length > 0) ?? null;
+        resolveLocate(located);
+      },
+    );
+  });
+}
+
+async function resolveWindowsTerminalShell(
+  args: ResolveWindowsTerminalShellArgs,
+): Promise<string> {
+  const locatedPwsh = await args.locateOnPath(WINDOWS_PWSH_EXE);
+  if (locatedPwsh !== null) {
+    return locatedPwsh;
+  }
+  for (const variable of ["ProgramFiles", "ProgramFiles(x86)"]) {
+    const programFiles = readWindowsEnvValue(args.env, variable);
+    if (programFiles === undefined || programFiles.length === 0) {
+      continue;
+    }
+    const candidate = `${normalizeWindowsDir(programFiles)}\\PowerShell\\7\\pwsh.exe`;
+    if (await args.pathIsExecutable(candidate)) {
+      return candidate;
+    }
+  }
+  const locatedPowerShell = await args.locateOnPath(WINDOWS_POWERSHELL_EXE);
+  if (locatedPowerShell !== null) {
+    return locatedPowerShell;
+  }
+  const systemRoot = normalizeWindowsDir(
+    readWindowsEnvValue(args.env, "SystemRoot") ?? "C:\\Windows",
+  );
+  const systemPowerShell = `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+  if (await args.pathIsExecutable(systemPowerShell)) {
+    return systemPowerShell;
+  }
+  const comSpec = readWindowsEnvValue(args.env, "ComSpec");
+  if (
+    comSpec !== undefined &&
+    comSpec.length > 0 &&
+    (await args.pathIsExecutable(comSpec))
+  ) {
+    return comSpec;
+  }
+  const systemCmd = `${systemRoot}\\System32\\cmd.exe`;
+  if (await args.pathIsExecutable(systemCmd)) {
+    return systemCmd;
+  }
+  if (comSpec !== undefined && comSpec.length > 0) {
+    return comSpec;
+  }
+  return WINDOWS_POWERSHELL_EXE;
+}
+
+function readPathValue(env: NodeJS.ProcessEnv): string | undefined {
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== undefined && key.toLowerCase() === "path") {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+export function buildTerminalEnv(
+  args: BuildTerminalEnvArgs,
+): NodeJS.ProcessEnv {
+  const sanitizedEnv = sanitizeInheritedChildProcessEnv({ env: process.env });
+  const mergedEnv: NodeJS.ProcessEnv = {
+    ...sanitizedEnv,
     ...args.shellEnv,
     BB_TERMINAL_SESSION_ID: args.terminalId,
     COLORTERM: "truecolor",
@@ -371,10 +515,35 @@ function buildTerminalEnv(args: BuildTerminalEnvArgs): NodeJS.ProcessEnv {
     PROMPT_EOL_MARK: "",
     TERM: "xterm-256color",
   };
+  if ((args.platform ?? process.platform) !== "win32") {
+    return mergedEnv;
+  }
+  const pathValue = readPathValue(args.shellEnv) ?? readPathValue(sanitizedEnv);
+  for (const key of Object.keys(mergedEnv)) {
+    if (key.toLowerCase() === "path") {
+      delete mergedEnv[key];
+    }
+  }
+  if (pathValue !== undefined) {
+    mergedEnv.Path = pathValue;
+  }
+  return mergedEnv;
 }
 
-function terminalTitleFromShell(shell: string): string {
-  return path.basename(shell) || "Terminal";
+export function isWindowsCommandShell(shell: string): boolean {
+  const baseName = shell.toLowerCase().split(/[/\\]/u).pop() ?? "";
+  return baseName === "cmd.exe" || baseName === "cmd";
+}
+
+function terminalTitleFromShell(
+  shell: string,
+  platform: NodeJS.Platform,
+): string {
+  const baseName =
+    platform === "win32"
+      ? (shell.split(/[/\\]/u).pop() ?? "")
+      : path.basename(shell);
+  return baseName || "Terminal";
 }
 
 function terminalTitleFromCommand(command: string): string {
@@ -385,22 +554,59 @@ function terminalTitleFromCommand(command: string): string {
   return `${truncateToWidth(normalized, 77)}...`;
 }
 
-function terminalSpawnArgsForStart(message: TerminalOpenMessage): string[] {
+export function terminalSpawnArgsForStart(
+  message: TerminalOpenMessage,
+  shell: string,
+  platform: NodeJS.Platform,
+): string[] {
+  if (platform !== "win32") {
+    switch (message.start.mode) {
+      case "shell":
+        return [];
+      case "command":
+        return ["-lc", message.start.command];
+    }
+  }
+  if (isWindowsCommandShell(shell)) {
+    switch (message.start.mode) {
+      case "shell":
+        return ["/d", "/s", "/k", `${WINDOWS_UTF8_CODE_PAGE_COMMAND}>nul`];
+      case "command":
+        return [
+          "/d",
+          "/s",
+          "/c",
+          `${WINDOWS_UTF8_CODE_PAGE_COMMAND}>nul & ${message.start.command}`,
+        ];
+    }
+  }
   switch (message.start.mode) {
     case "shell":
-      return [];
+      return [
+        "-NoLogo",
+        "-NoProfile",
+        "-NoExit",
+        "-Command",
+        `${WINDOWS_UTF8_CODE_PAGE_COMMAND} >$null`,
+      ];
     case "command":
-      return ["-lc", message.start.command];
+      return [
+        "-NoLogo",
+        "-NoProfile",
+        "-Command",
+        `${WINDOWS_UTF8_CODE_PAGE_COMMAND} >$null; ${message.start.command}`,
+      ];
   }
 }
 
 function terminalTitleForStart(
   message: TerminalOpenMessage,
   shell: string,
+  platform: NodeJS.Platform,
 ): string {
   switch (message.start.mode) {
     case "shell":
-      return terminalTitleFromShell(shell);
+      return terminalTitleFromShell(shell, platform);
     case "command":
       return terminalTitleFromCommand(message.start.command);
   }
@@ -483,7 +689,9 @@ export class TerminalManager {
       options.maxExitedTerminals ?? DEFAULT_MAX_EXITED_TERMINALS;
     this.platform = options.platform ?? process.platform;
     this.ptyAdapter = options.ptyAdapter ?? nodePtyAdapter;
-    this.resolveShell = options.resolveShell ?? resolveDefaultTerminalShell;
+    this.resolveShell =
+      options.resolveShell ??
+      (() => resolveDefaultTerminalShell({ platform: this.platform }));
   }
 
   dispose(): void {
@@ -528,6 +736,59 @@ export class TerminalManager {
     }
   }
 
+  private registerTerminalSweepRoot(
+    session: TerminalSession,
+    cwd: string,
+  ): void {
+    if (session.pty.pid === undefined) {
+      return;
+    }
+    if (this.tryRegisterTerminalSweepRoot(session, cwd)) {
+      return;
+    }
+    let attempts = 0;
+    const retry = (): void => {
+      if (this.sessions.get(session.terminalId) !== session) {
+        return;
+      }
+      if (this.tryRegisterTerminalSweepRoot(session, cwd)) {
+        session.sweepTimer = null;
+        return;
+      }
+      attempts += 1;
+      if (attempts >= TERMINAL_SWEEP_REGISTER_RETRIES) {
+        session.sweepTimer = null;
+        return;
+      }
+      session.sweepTimer = setTimeout(retry, TERMINAL_SWEEP_REGISTER_RETRY_MS);
+    };
+    session.sweepTimer = setTimeout(retry, TERMINAL_SWEEP_REGISTER_RETRY_MS);
+  }
+
+  private tryRegisterTerminalSweepRoot(
+    session: TerminalSession,
+    cwd: string,
+  ): boolean {
+    const pid = session.pty.pid;
+    if (pid === undefined || !Number.isInteger(pid) || pid <= 0) {
+      return false;
+    }
+    registerSweepRootProcess({ pid, cwd });
+    session.sweepPid = pid;
+    return true;
+  }
+
+  private unregisterTerminalSweepRoot(session: TerminalSession): void {
+    if (session.sweepTimer !== null) {
+      clearTimeout(session.sweepTimer);
+      session.sweepTimer = null;
+    }
+    if (session.sweepPid !== null) {
+      unregisterSweepRootProcess(session.sweepPid);
+      session.sweepPid = null;
+    }
+  }
+
   async shutdownAll(
     reason: TerminalSessionCloseReason = "daemon-disconnect",
   ): Promise<void> {
@@ -556,27 +817,19 @@ export class TerminalManager {
       return;
     }
 
-    if (this.platform === "win32") {
-      this.sendTerminalError({
-        code: "unsupported_platform",
-        message: "Native Windows terminals are not supported",
-        requestId: message.requestId,
-        terminalId: message.terminalId,
-      });
-      return;
-    }
-
     this.openingTerminalIds.add(message.terminalId);
+    let spawnedPty: TerminalPtyProcess | null = null;
     try {
       const target = await this.resolveTerminalOpenTarget(message);
       const shell = await this.resolveShell();
-      const pty = this.ptyAdapter.spawn({
-        args: terminalSpawnArgsForStart(message),
+      spawnedPty = this.ptyAdapter.spawn({
+        args: terminalSpawnArgsForStart(message, shell, this.platform),
         cols: message.cols,
         cwd: target.cwd,
         env: operationEnvironment(
           message.contributedEnv,
           buildTerminalEnv({
+            platform: this.platform,
             shellEnv: this.options.runtimeManager.getShellEnv(),
             terminalId: message.terminalId,
           }),
@@ -585,6 +838,7 @@ export class TerminalManager {
         logger: this.options.logger,
         rows: message.rows,
       });
+      const pty = spawnedPty;
       const session: TerminalSession = {
         closeReason: null,
         closeTimeout: null,
@@ -600,9 +854,12 @@ export class TerminalManager {
         rows: message.rows,
         scrollback: [],
         scrollbackBytes: 0,
+        sweepPid: null,
+        sweepTimer: null,
         terminalId: message.terminalId,
       };
       this.sessions.set(message.terminalId, session);
+      this.registerTerminalSweepRoot(session, target.cwd);
       if (target.environmentId !== null) {
         this.options.runtimeManager.markTerminalActive(
           target.environmentId,
@@ -611,6 +868,8 @@ export class TerminalManager {
       }
       session.disposables.push(
         pty.onData((data) => this.handleTerminalOutput(session, data)),
+      );
+      session.disposables.push(
         pty.onExit((event) => {
           void this.runTerminalOperation({
             operation: () =>
@@ -636,12 +895,16 @@ export class TerminalManager {
         requestId: message.requestId,
         terminalId: message.terminalId,
         shell,
-        title: terminalTitleForStart(message, shell),
+        title: terminalTitleForStart(message, shell, this.platform),
         initialCwd: target.cwd,
         cols: message.cols,
         rows: message.rows,
       });
     } catch (error) {
+      this.cleanupFailedTerminalOpen({
+        pty: spawnedPty,
+        terminalId: message.terminalId,
+      });
       const code =
         error instanceof ExpectedCommandDispatchError &&
         error.code === "workspace_type_mismatch"
@@ -655,6 +918,80 @@ export class TerminalManager {
       });
     } finally {
       this.openingTerminalIds.delete(message.terminalId);
+    }
+  }
+
+  private cleanupFailedTerminalOpen(args: {
+    pty: TerminalPtyProcess | null;
+    terminalId: string;
+  }): void {
+    const session = this.sessions.get(args.terminalId);
+    if (session !== undefined) {
+      this.sessions.delete(args.terminalId);
+      this.unregisterTerminalSweepRoot(session);
+      if (session.outputFlushTimeout !== null) {
+        clearTimeout(session.outputFlushTimeout);
+        session.outputFlushTimeout = null;
+      }
+      if (session.closeTimeout !== null) {
+        clearTimeout(session.closeTimeout);
+        session.closeTimeout = null;
+      }
+      if (session.environmentId !== null) {
+        try {
+          this.options.runtimeManager.markTerminalInactive(
+            session.environmentId,
+            session.terminalId,
+          );
+        } catch (error) {
+          this.options.logger.warn(
+            {
+              terminalId: session.terminalId,
+              ...runtimeErrorLogFields(error),
+            },
+            "Failed to release environment terminal after failed open",
+          );
+        }
+      }
+      for (const disposable of session.disposables) {
+        try {
+          disposable.dispose();
+        } catch (error) {
+          this.options.logger.warn(
+            {
+              terminalId: session.terminalId,
+              ...runtimeErrorLogFields(error),
+            },
+            "Failed to dispose terminal listener after failed open",
+          );
+        }
+      }
+    }
+    const pty = args.pty ?? session?.pty ?? null;
+    if (pty === null) {
+      return;
+    }
+    try {
+      pty.kill();
+    } catch (error) {
+      this.options.logger.warn(
+        {
+          terminalId: args.terminalId,
+          ...runtimeErrorLogFields(error),
+        },
+        "Failed to kill terminal PTY after failed open",
+      );
+    }
+    try {
+      pty.dispose();
+    } catch (error) {
+      this.options.logger.warn(
+        {
+          terminalId: args.terminalId,
+          ...runtimeErrorLogFields(error),
+        },
+        "Failed to dispose terminal PTY after failed open",
+      );
     }
   }
 
@@ -963,6 +1300,7 @@ export class TerminalManager {
       args.session.closeTimeout = null;
     }
     this.sessions.delete(args.session.terminalId);
+    this.unregisterTerminalSweepRoot(args.session);
     this.retainExitedSession(args.session);
     if (args.session.environmentId !== null) {
       this.options.runtimeManager.markTerminalInactive(

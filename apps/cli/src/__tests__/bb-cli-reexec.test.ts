@@ -1,9 +1,13 @@
 import { realpathSync } from "node:fs";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BB_CLI_REEXEC_ENV, maybeReexecViaBbCli } from "../bb-cli-reexec.js";
+import {
+  BB_CLI_REEXEC_ENV,
+  maybeReexecViaBbCli,
+  resolveBbCliReexecSpawnPlan,
+} from "../bb-cli-reexec.js";
 
 describe("maybeReexecViaBbCli", () => {
   let tempRoot: string;
@@ -87,5 +91,106 @@ describe("maybeReexecViaBbCli", () => {
       reexec,
     });
     expect(reexec).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveBbCliReexecSpawnPlan", () => {
+  let planRoot: string;
+
+  beforeEach(async () => {
+    planRoot = await mkdtemp(join(tmpdir(), "bb-cli-reexec-plan-"));
+  });
+
+  afterEach(async () => {
+    await rm(planRoot, { recursive: true, force: true });
+  });
+
+  it("spawns posix targets directly without a shell", () => {
+    expect(resolveBbCliReexecSpawnPlan(join(planRoot, "bb"), "linux")).toEqual({
+      argsPrefix: [],
+      command: join(planRoot, "bb"),
+    });
+  });
+
+  it("spawns a win32 .cmd beside a space-free sibling through the sibling without a shell", async () => {
+    const sibling = join(planRoot, "bb");
+    await writeFile(sibling, "console.log(1)", { mode: 0o755 });
+    const launcher = `${sibling}.cmd`;
+    await writeFile(launcher, "@node %~dp0bb %*", { mode: 0o755 });
+    expect(resolveBbCliReexecSpawnPlan(launcher, "win32")).toEqual({
+      argsPrefix: [sibling],
+      command: process.execPath,
+    });
+  });
+
+  it("spawns a win32 .cmd beside a sibling in a path containing a space without a shell", async () => {
+    const spacedDir = join(planRoot, "bb wn");
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(spacedDir, { recursive: true });
+    const sibling = join(spacedDir, "bb");
+    await writeFile(sibling, "console.log(1)", { mode: 0o755 });
+    const launcher = `${sibling}.cmd`;
+    await writeFile(launcher, "@node %~dp0bb %*", { mode: 0o755 });
+    const plan = resolveBbCliReexecSpawnPlan(launcher, "win32");
+    expect(plan).toEqual({
+      argsPrefix: [sibling],
+      command: process.execPath,
+    });
+    const { spawnSync } = await import("node:child_process");
+    const result = spawnSync(plan.command, [...plan.argsPrefix, "--version"], {
+      encoding: "utf8",
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(0);
+  });
+
+  it.runIf(process.platform === "win32")(
+    "reexecutes a foreign cmd shim without expanding argument metacharacters",
+    async () => {
+      const launcher = join(planRoot, "foreign.cmd");
+      const entry = join(planRoot, "writer.cjs");
+      const output = join(planRoot, "arguments.json");
+      await writeFile(launcher, '@node "%~dp0writer.cjs" %*\r\n');
+      await writeFile(
+        entry,
+        'require("node:fs").writeFileSync(process.env.BB_TEST_ARGV_FILE, JSON.stringify(process.argv.slice(2)));',
+      );
+      const argv = [
+        "space and Кириллица",
+        "a&b",
+        "%USERNAME%",
+        "literal$(value)",
+      ];
+      const exit = vi.spyOn(process, "exit").mockImplementation(() => {
+        throw new Error("test process exit");
+      });
+      try {
+        expect(() =>
+          maybeReexecViaBbCli({
+            env: {
+              ...process.env,
+              BB_CLI: launcher,
+              BB_CLI_REEXEC: "0",
+              BB_TEST_ARGV_FILE: output,
+            },
+            currentExecutablePath: entry,
+            argv,
+          }),
+        ).toThrow("test process exit");
+        expect(exit).toHaveBeenCalledWith(0);
+        expect(JSON.parse(await readFile(output, "utf8"))).toEqual(argv);
+      } finally {
+        exit.mockRestore();
+      }
+    },
+  );
+
+  it("passes a foreign win32 .cmd to the portable launcher", () => {
+    expect(
+      resolveBbCliReexecSpawnPlan(join(planRoot, "missing.cmd"), "win32"),
+    ).toEqual({
+      argsPrefix: [],
+      command: join(planRoot, "missing.cmd"),
+    });
   });
 });

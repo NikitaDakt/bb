@@ -1,6 +1,11 @@
 import path from "node:path";
 import { toOptionalString } from "@bb/provider-bridge-protocol/bridge-kit";
 import { z } from "zod";
+import {
+  agentPathFlavorForAnchor,
+  isWin32ShapedPath,
+  type AgentPathFlavor,
+} from "./agent-paths.js";
 import type { AcpToolCallContent } from "./wire.js";
 
 export interface AcpToolCallOperationInput {
@@ -36,15 +41,25 @@ export interface AcpToolCallPathOptions {
   cwd?: string | undefined;
 }
 
+function resolveFlavor(value: string, cwd: string): AgentPathFlavor {
+  if (isWin32ShapedPath(value)) return agentPathFlavorForAnchor(value);
+  if (value.startsWith("/")) return agentPathFlavorForAnchor(value);
+  return agentPathFlavorForAnchor(cwd);
+}
+
 export function resolveAcpToolCallPath(
   value: string,
   options: AcpToolCallPathOptions | undefined,
 ): string {
   const cwd = options?.cwd;
-  if (cwd === undefined || path.isAbsolute(value) || value.startsWith("~")) {
+  if (cwd === undefined || value.startsWith("~")) {
     return value;
   }
-  return path.resolve(cwd, value);
+  const flavor = resolveFlavor(value, cwd);
+  if (flavor.isAbsolute(value)) {
+    return value;
+  }
+  return flavor.resolve(cwd, value);
 }
 
 export function extractAcpCommand(
@@ -118,9 +133,20 @@ export function classifyAcpToolCall(
 export function resolveAcpFileChangeWriteScope(
   paths: readonly string[],
 ): string | null {
-  const normalized = paths.filter(isNonBlank).map((entry) => {
-    const value = path.normalize(entry);
-    return value.length > 1 && value.endsWith(path.sep)
+  const nonBlank = paths.filter(isNonBlank);
+  if (nonBlank.length === 0) {
+    return null;
+  }
+  if (
+    nonBlank.some((entry) => isWin32ShapedPath(entry)) &&
+    nonBlank.some((entry) => !isWin32ShapedPath(entry))
+  ) {
+    return null;
+  }
+  const flavor = nonBlank.some(isWin32ShapedPath) ? path.win32 : path.posix;
+  const normalized = nonBlank.map((entry) => {
+    const value = flavor.normalize(entry);
+    return value.length > 1 && value.endsWith(flavor.sep)
       ? value.slice(0, -1)
       : value;
   });
@@ -134,9 +160,9 @@ export function resolveAcpFileChangeWriteScope(
       candidate = entry;
     }
   }
-  const prefix = candidate.endsWith(path.sep)
+  const prefix = candidate.endsWith(flavor.sep)
     ? candidate
-    : candidate + path.sep;
+    : candidate + flavor.sep;
   for (const entry of normalized) {
     if (entry !== candidate && !entry.startsWith(prefix)) {
       return null;

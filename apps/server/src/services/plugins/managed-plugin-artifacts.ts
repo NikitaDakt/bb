@@ -38,6 +38,7 @@ import type {
 import { resolveSelectedSubdirectory } from "./collection-manifest.js";
 import {
   gitArtifactCacheDir,
+  gitScratchCloneDir,
   hashInstallDir,
   nestedPluginRoots,
   npmArtifactCacheDir,
@@ -151,9 +152,13 @@ async function cloneGitCommit(
   commit: string,
   notFoundHint?: string,
 ): Promise<void> {
-  await runInstallCommand("git", ["clone", "--quiet", url, stagingDir], {
-    notFoundHint,
-  });
+  await runInstallCommand(
+    "git",
+    ["-c", "core.symlinks=true", "clone", "--quiet", url, stagingDir],
+    {
+      notFoundHint,
+    },
+  );
   await runInstallCommand("git", [
     "-C",
     stagingDir,
@@ -594,7 +599,7 @@ export function createManagedPluginArtifacts(
       args.parsed.cachePath,
       args.candidate.commit,
     );
-    const stagingDir = `${targetDir}.install-probe-${randomUUID()}`;
+    const stagingDir = gitScratchCloneDir(deps.dataDir);
     await mkdir(dirname(stagingDir), { recursive: true });
     try {
       deps.onArtifactMaterialize?.({ path: targetDir });
@@ -1191,7 +1196,7 @@ export function createManagedPluginArtifacts(
     }
     const stagingDir = args.promote
       ? `${targetDir}.staging`
-      : `${targetDir}.update-staging-${randomUUID()}`;
+      : gitScratchCloneDir(deps.dataDir);
     await rm(stagingDir, { recursive: true, force: true });
     await mkdir(dirname(stagingDir), { recursive: true });
     try {

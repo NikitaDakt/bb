@@ -467,4 +467,25 @@ describe("permission reason", () => {
       },
     });
   });
+
+  it("resolves Windows-shaped relative permission paths against the session cwd", () => {
+    const payload = buildAcpPermissionInteractionPayload({
+      toolCall: {
+        toolCallId: "call-win",
+        title: "Edit notes.md",
+        kind: "edit",
+        locations: [{ path: "notes\\todo.md" }],
+      },
+      options: allowDenyOptions,
+      cwd: "C:\\workspace\\app",
+    });
+
+    expect(payload).toMatchObject({
+      kind: "approval",
+      subject: {
+        kind: "file_change",
+        writeScope: "C:\\workspace\\app\\notes\\todo.md",
+      },
+    });
+  });
 });

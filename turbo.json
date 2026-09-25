@@ -225,7 +225,7 @@
     },
     "@bb/desktop#build": {
       "dependsOn": ["bb-app#build"],
-      "env": ["BB_DESKTOP_RELEASE_CHANNEL"],
+      "env": ["BB_DESKTOP_RELEASE_CHANNEL", "BB_DESKTOP_RELEASE_REPOSITORY"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/apps/desktop/**",
@@ -247,6 +247,12 @@
       "passThroughEnv": ["*"]
     },
     "@bb/desktop#desktop:build:linux": {
+      "dependsOn": ["bb-app#build", "@bb/desktop#build"],
+      "cache": false,
+      "outputs": ["release/**"],
+      "passThroughEnv": ["*"]
+    },
+    "@bb/desktop#desktop:build:win": {
       "dependsOn": ["bb-app#build", "@bb/desktop#build"],
       "cache": false,
       "outputs": ["release/**"],

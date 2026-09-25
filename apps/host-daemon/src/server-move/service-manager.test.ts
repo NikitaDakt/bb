@@ -36,6 +36,33 @@ function definition(
 }
 
 describe("restartService", () => {
+  it.each(["windows-task", "windows-run-key"] as const)(
+    "restarts %s outside the tree it must terminate",
+    async (manager) => {
+      const runCommand = vi.fn<ServerMoveCommandRunner>(async () => undefined);
+      const spawnDetached = vi.fn(async () => 1);
+      await restartService({
+        definition: {
+          ...definition(manager, "bb-host-daemon-test"),
+          environment: { BB_DATA_DIR: "C:\\data user's %PATH%" },
+        },
+        runCommand,
+        spawnDetached,
+        uid: 0,
+        env: {},
+        logPath: "/logs/restart",
+      });
+      expect(spawnDetached).not.toHaveBeenCalled();
+      const command = runCommand.mock.calls[0];
+      expect(command?.[0]).toBe("powershell.exe");
+      const script = command?.[1].at(-1) ?? "";
+      expect(script).toContain("Invoke-CimMethod -ClassName Win32_Process");
+      const encoded = /-EncodedCommand ([A-Za-z0-9+/=]+)/u.exec(script)?.[1];
+      expect(
+        Buffer.from(encoded ?? "", "base64").toString("utf16le"),
+      ).toContain("-Restart -DataDir 'C:\\data user''s %PATH%'");
+    },
+  );
   it.each([
     ["systemd-user", "--user"],
     ["systemd-system", "--system"],
@@ -127,32 +154,35 @@ describe("restartService", () => {
     ]);
   });
 
-  it("runs launchctl bootout before bootstrap in the helper script", async () => {
-    const root = await mkdtemp(join(tmpdir(), "bb-launchd-helper-test-"));
-    roots.push(root);
-    const callsPath = join(root, "calls.log");
-    const launchctlPath = join(root, "launchctl");
-    await writeFile(
-      launchctlPath,
-      `#!/bin/sh\nprintf '%s\\n' "$*" >> "${callsPath}"\n`,
-    );
-    await chmod(launchctlPath, 0o755);
+  it.skipIf(process.platform === "win32")(
+    "runs launchctl bootout before bootstrap in the helper script",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "bb-launchd-helper-test-"));
+      roots.push(root);
+      const callsPath = join(root, "calls.log");
+      const launchctlPath = join(root, "launchctl");
+      await writeFile(
+        launchctlPath,
+        `#!/bin/sh\nprintf '%s\\n' "$*" >> "${callsPath}"\n`,
+      );
+      await chmod(launchctlPath, 0o755);
 
-    await execFileAsync(
-      "/bin/sh",
-      [
-        "-c",
-        LAUNCHD_RESTART_SCRIPT,
-        "bb-server-move-restart",
-        "gui/501",
-        "/Users/me/Library/LaunchAgents/app.plist",
-      ],
-      { env: { PATH: `${root}${delimiter}${process.env.PATH ?? ""}` } },
-    );
+      await execFileAsync(
+        "/bin/sh",
+        [
+          "-c",
+          LAUNCHD_RESTART_SCRIPT,
+          "bb-server-move-restart",
+          "gui/501",
+          "/Users/me/Library/LaunchAgents/app.plist",
+        ],
+        { env: { PATH: `${root}${delimiter}${process.env.PATH ?? ""}` } },
+      );
 
-    expect((await readFile(callsPath, "utf8")).trim().split("\n")).toEqual([
-      "bootout gui/501 /Users/me/Library/LaunchAgents/app.plist",
-      "bootstrap gui/501 /Users/me/Library/LaunchAgents/app.plist",
-    ]);
-  });
+      expect((await readFile(callsPath, "utf8")).trim().split("\n")).toEqual([
+        "bootout gui/501 /Users/me/Library/LaunchAgents/app.plist",
+        "bootstrap gui/501 /Users/me/Library/LaunchAgents/app.plist",
+      ]);
+    },
+  );
 });

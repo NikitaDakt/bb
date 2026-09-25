@@ -50,6 +50,18 @@ esac
 exit "\${FAKE_INSTALLER_EXIT:-0}"
 `;
 
+const FAKE_WINDOWS_INSTALLER = String.raw`param([switch]$Adopt, [string]$DataDir)
+[IO.File]::WriteAllLines($env:FAKE_INSTALLER_LOG, @('-Adopt', '-DataDir', $DataDir), (New-Object Text.UTF8Encoding $false))
+$lines = @(
+  '$ErrorActionPreference = ''Stop'''
+  '$bbServiceManager = ''windows-task'''
+  '$env:BB_DATA_DIR=''' + $DataDir.Replace("'", "''") + ''''
+  '& ''node.exe'' ''bb-app.js'' ''host-daemon'''
+)
+[IO.File]::WriteAllLines((Join-Path $DataDir 'bb-host-daemon-test.ps1'), [string[]]$lines, (New-Object Text.UTF8Encoding $true))
+exit ([int]$env:FAKE_INSTALLER_EXIT)
+`;
+
 interface Fixture {
   dataDir: string;
   homeDir: string;
@@ -91,8 +103,14 @@ async function createFixture(): Promise<Fixture> {
       serverHeaders: { "x-bb-connect-machine": "grant-secret" },
     }),
   );
-  const installerPath = join(root, "install-machine.sh");
-  await writeFile(installerPath, FAKE_INSTALLER);
+  const installerPath = join(
+    root,
+    process.platform === "win32" ? "install-machine.ps1" : "install-machine.sh",
+  );
+  await writeFile(
+    installerPath,
+    process.platform === "win32" ? FAKE_WINDOWS_INSTALLER : FAKE_INSTALLER,
+  );
   const installerLog = join(root, "installer.log");
   vi.stubEnv("HOME", homeDir);
   vi.stubEnv("BB_MACHINE_INSTALLER", installerPath);
@@ -151,16 +169,24 @@ describe("bb server install-machine-service", () => {
       register,
     );
 
-    await expect(bbExit).resolves.toBe("SIGTERM");
+    await expect(bbExit).resolves.toBe(
+      process.platform === "win32" ? null : "SIGTERM",
+    );
     await expect(readBbAppRuntimeFile(fixture.dataDir)).resolves.toBeNull();
     expect(
-      (await readFile(fixture.installerLog, "utf8")).trim().split("\n"),
-    ).toEqual(["--adopt", "--data-dir", fixture.dataDir]);
+      (await readFile(fixture.installerLog, "utf8")).trim().split(/\r?\n/u),
+    ).toEqual(
+      process.platform === "win32"
+        ? ["-Adopt", "-DataDir", fixture.dataDir]
+        : ["--adopt", "--data-dir", fixture.dataDir],
+    );
     const result = JSON.parse(collectLogPayloads(vi.mocked(console.log))[0]!);
     expect(result).toEqual({
       dataDir: fixture.dataDir,
       serverUrl: "https://me.getbb.app",
-      serviceFile: expect.stringContaining(fixture.homeDir),
+      serviceFile: expect.stringContaining(
+        process.platform === "win32" ? fixture.dataDir : fixture.homeDir,
+      ),
       toHostName: "desktop",
     });
     expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
@@ -192,38 +218,41 @@ describe("bb server install-machine-service", () => {
     await expect(readFile(fixture.installerLog, "utf8")).rejects.toThrow();
   });
 
-  it("leaves bb running when node on the PATH is too old for the service", async () => {
-    const fixture = await createFixture();
-    const bb = await startRecordedBb(fixture);
-    const binDir = join(fixture.root, "bin");
-    await mkdir(binDir);
-    await writeFile(
-      join(binDir, "node"),
-      "#!/bin/sh\nprintf '%s\\n' 20.18.1\n",
-    );
-    await chmod(join(binDir, "node"), 0o755);
-    vi.stubEnv("PATH", [binDir, "/usr/bin", "/bin"].join(delimiter));
+  it.skipIf(process.platform === "win32")(
+    "leaves bb running when node on the PATH is too old for the service",
+    async () => {
+      const fixture = await createFixture();
+      const bb = await startRecordedBb(fixture);
+      const binDir = join(fixture.root, "bin");
+      await mkdir(binDir);
+      await writeFile(
+        join(binDir, "node"),
+        "#!/bin/sh\nprintf '%s\\n' 20.18.1\n",
+      );
+      await chmod(join(binDir, "node"), 0o755);
+      vi.stubEnv("PATH", [binDir, "/usr/bin", "/bin"].join(delimiter));
 
-    await expect(
-      runCommand(
-        [
-          "server",
-          "install-machine-service",
-          "--data-dir",
-          fixture.dataDir,
-          "--yes",
-        ],
-        register,
-      ),
-    ).rejects.toThrow("process.exit:1");
+      await expect(
+        runCommand(
+          [
+            "server",
+            "install-machine-service",
+            "--data-dir",
+            fixture.dataDir,
+            "--yes",
+          ],
+          register,
+        ),
+      ).rejects.toThrow("process.exit:1");
 
-    expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
-      "Error: The background service runs bb with the node on your PATH, which is Node.js 20.18.1. Install Node.js 22.19 or newer, then run this command again.",
-    ]);
-    expect(bb.exitCode).toBeNull();
-    expect(bb.signalCode).toBeNull();
-    await expect(readFile(fixture.installerLog, "utf8")).rejects.toThrow();
-  });
+      expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
+        "Error: The background service runs bb with the node on your PATH, which is Node.js 20.18.1. Install Node.js 22.19 or newer, then run this command again.",
+      ]);
+      expect(bb.exitCode).toBeNull();
+      expect(bb.signalCode).toBeNull();
+      await expect(readFile(fixture.installerLog, "utf8")).rejects.toThrow();
+    },
+  );
 
   it("reports an installer failure", async () => {
     const fixture = await createFixture();

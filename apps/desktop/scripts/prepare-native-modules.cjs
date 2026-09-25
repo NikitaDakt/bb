@@ -13,7 +13,12 @@ const PACKAGED_NATIVE_PACKAGE_NAMES = [
   BETTER_SQLITE3_PACKAGE_NAME,
 ];
 
-const NODE_PTY_PREBUILD_PLATFORMS = ["darwin-arm64", "darwin-x64"];
+const NODE_PTY_PREBUILD_PLATFORMS = [
+  "darwin-arm64",
+  "darwin-x64",
+  "win32-arm64",
+  "win32-x64",
+];
 const NODE_PTY_SPAWN_HELPER_RELATIVE_PATHS = [
   path.join("build", "Release", "spawn-helper"),
   ...NODE_PTY_PREBUILD_PLATFORMS.map((platform) =>

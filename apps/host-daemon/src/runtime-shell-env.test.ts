@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createUserShellPathResolver,
   prepareRuntimeShellEnv,
+  resolveBbExecutablePathInDirectory,
   resolveLocalBbExecutablePath,
   type SpawnUserShellEnv,
   type SpawnUserShellEnvArgs,
@@ -12,6 +13,9 @@ import {
 } from "./runtime-shell-env.js";
 
 const tempDirs: string[] = [];
+
+const EXECUTE_BIT_UNENFORCEABLE_ON_WINDOWS_NTFS_MEASURED_ACCESS_X_OK_ALWAYS_SUCCEEDS =
+  process.platform === "win32";
 
 async function makeTempDir(prefix: string): Promise<string> {
   const directoryPath = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -46,30 +50,6 @@ interface CreateShellEnvSpawnResultArgs {
 
 interface CreateFakeShellEnvSpawnArgs {
   results: UserShellEnvSpawnResult[];
-}
-
-async function withPlatform<T>(
-  platform: NodeJS.Platform,
-  action: () => Promise<T>,
-): Promise<T> {
-  const originalDescriptor = Object.getOwnPropertyDescriptor(
-    process,
-    "platform",
-  );
-  if (!originalDescriptor) {
-    throw new Error("Expected process.platform descriptor");
-  }
-
-  Object.defineProperty(process, "platform", {
-    configurable: true,
-    value: platform,
-  });
-
-  try {
-    return await action();
-  } finally {
-    Object.defineProperty(process, "platform", originalDescriptor);
-  }
 }
 
 async function createFakeCliPackage(
@@ -198,6 +178,11 @@ describe("resolveLocalBbExecutablePath", () => {
   });
 
   it("fails clearly when the built CLI entry is not executable", async () => {
+    if (
+      EXECUTE_BIT_UNENFORCEABLE_ON_WINDOWS_NTFS_MEASURED_ACCESS_X_OK_ALWAYS_SUCCEEDS
+    ) {
+      return;
+    }
     const { cliEntryPath } = await createFakeCliPackage({
       executable: false,
     });
@@ -205,6 +190,7 @@ describe("resolveLocalBbExecutablePath", () => {
     await expect(
       resolveLocalBbExecutablePath({
         cliExecutablePath: cliEntryPath,
+        platform: "linux",
       }),
     ).rejects.toThrow(
       `Resolved bb CLI entry is not executable: ${cliEntryPath}. Build @bb/cli before starting the host daemon.`,
@@ -217,11 +203,10 @@ describe("resolveLocalBbExecutablePath", () => {
     });
 
     await expect(
-      withPlatform("win32", () =>
-        resolveLocalBbExecutablePath({
-          cliExecutablePath: cliEntryPath,
-        }),
-      ),
+      resolveLocalBbExecutablePath({
+        cliExecutablePath: cliEntryPath,
+        platform: "win32",
+      }),
     ).resolves.toBe(cliEntryPath);
   });
 });
@@ -385,24 +370,211 @@ describe("createUserShellPathResolver", () => {
     expect(fakeSpawn.calls[0]?.args[0]).toBe("-ilc");
   });
 
-  it("skips shell probing on Windows", async () => {
+  it("probes PATH through PowerShell with base64 pairs on Windows", async () => {
+    const pathValue = "C:\\Tools;C:\\Windows";
+    const encodedPath = Buffer.from(pathValue, "utf8").toString("base64");
+    const encodedTricky = Buffer.from("a=b\nc=d", "utf8").toString("base64");
     const fakeSpawn = createFakeShellEnvSpawn({
       results: [
         createShellEnvSpawnResult({
-          stdout: createMarkedShellEnvOutput("C:\\Windows"),
+          stdout: [
+            "profile noise",
+            "__BB_SHELL_ENV_START__",
+            `TRICKY=${encodedTricky}`,
+            `Path=${encodedPath}`,
+            "__BB_SHELL_ENV_END__",
+            "more noise",
+          ].join("\r\n"),
         }),
       ],
     });
 
     await expect(
       createUserShellPathResolver({
-        env: { SHELL: "/bin/bash", PATH: "C:\\Windows" },
+        env: { SystemRoot: "C:\\Windows", Path: "C:\\Windows" },
+        fileExists: () => false,
+        platform: "win32",
+        spawnUserShellEnv: fakeSpawn.spawn,
+      })(),
+    ).resolves.toBe(pathValue);
+
+    expect(fakeSpawn.calls).toHaveLength(1);
+    expect(fakeSpawn.calls[0]?.command).toBe("powershell.exe");
+    expect(fakeSpawn.calls[0]?.args[0]).toBe("-NoLogo");
+    expect(fakeSpawn.calls[0]?.args[1]).toBe("-Command");
+    expect(fakeSpawn.calls[0]?.args[2]).toContain("Get-ChildItem Env:");
+    expect(fakeSpawn.calls[0]?.args[2]).toContain("__BB_SHELL_ENV_START__");
+  });
+
+  it("ignores a hostile profile faking the full marker pair on Windows", async () => {
+    const pathValue = "C:\\Tools;C:\\Windows";
+    const encodedPath = Buffer.from(pathValue, "utf8").toString("base64");
+    const encodedEvil = Buffer.from("C:\\evil", "utf8").toString("base64");
+    const fakeSpawn = createFakeShellEnvSpawn({
+      results: [
+        createShellEnvSpawnResult({
+          stdout: [
+            "morning banner: all systems nominal",
+            "__BB_SHELL_ENV_START__",
+            `PATH=${encodedEvil}`,
+            "__BB_SHELL_ENV_END__",
+            "\u001b[32mgreen status text\u001b[0m",
+            "PATH=not-base64-at-all!!!",
+            "__BB_SHELL_ENV_START__",
+            `Path=${encodedPath}`,
+            "__BB_SHELL_ENV_END__",
+          ].join("\r\n"),
+        }),
+      ],
+    });
+
+    await expect(
+      createUserShellPathResolver({
+        env: { SystemRoot: "C:\\Windows", Path: "C:\\Windows" },
+        fileExists: () => false,
+        platform: "win32",
+        spawnUserShellEnv: fakeSpawn.spawn,
+      })(),
+    ).resolves.toBe(pathValue);
+  });
+
+  it("ignores a hostile profile faking a start marker and PATH without an end", async () => {
+    const pathValue = "C:\\Tools;C:\\Windows";
+    const encodedPath = Buffer.from(pathValue, "utf8").toString("base64");
+    const encodedEvil = Buffer.from("C:\\evil", "utf8").toString("base64");
+    const fakeSpawn = createFakeShellEnvSpawn({
+      results: [
+        createShellEnvSpawnResult({
+          stdout: [
+            "banner",
+            "__BB_SHELL_ENV_START__",
+            `Path=${encodedEvil}`,
+            "\u001b[1;31mred alert\u001b[0m",
+            "__BB_SHELL_ENV_START__",
+            `Path=${encodedPath}`,
+            "__BB_SHELL_ENV_END__",
+          ].join("\r\n"),
+        }),
+      ],
+    });
+
+    await expect(
+      createUserShellPathResolver({
+        env: { SystemRoot: "C:\\Windows", Path: "C:\\Windows" },
+        fileExists: () => false,
+        platform: "win32",
+        spawnUserShellEnv: fakeSpawn.spawn,
+      })(),
+    ).resolves.toBe(pathValue);
+  });
+
+  it("prefers pwsh.exe found on the Windows PATH", async () => {
+    const pathValue = "C:\\Tools";
+    const fakeSpawn = createFakeShellEnvSpawn({
+      results: [
+        createShellEnvSpawnResult({
+          stdout: [
+            "__BB_SHELL_ENV_START__",
+            `Path=${Buffer.from(pathValue, "utf8").toString("base64")}`,
+            "__BB_SHELL_ENV_END__",
+          ].join("\n"),
+        }),
+      ],
+    });
+
+    await expect(
+      createUserShellPathResolver({
+        env: { Path: "C:\\Tools;C:\\Windows" },
+        fileExists: (filePath) => filePath === "C:\\Tools\\pwsh.exe",
+        platform: "win32",
+        spawnUserShellEnv: fakeSpawn.spawn,
+      })(),
+    ).resolves.toBe(pathValue);
+
+    expect(fakeSpawn.calls[0]?.command).toBe("C:\\Tools\\pwsh.exe");
+  });
+
+  it("honors an sh-like SHELL on Windows with the POSIX probe", async () => {
+    const shellPath = "/c/tools/bin:/usr/bin";
+    const fakeSpawn = createFakeShellEnvSpawn({
+      results: [
+        createShellEnvSpawnResult({
+          stdout: createMarkedShellEnvOutput(shellPath),
+        }),
+      ],
+    });
+
+    await expect(
+      createUserShellPathResolver({
+        env: {
+          SHELL: "C:\\Program Files\\Git\\bin\\bash.exe",
+          PATH: "C:\\Windows",
+        },
+        platform: "win32",
+        spawnUserShellEnv: fakeSpawn.spawn,
+      })(),
+    ).resolves.toBe(shellPath);
+
+    expect(fakeSpawn.calls[0]?.command).toBe(
+      "C:\\Program Files\\Git\\bin\\bash.exe",
+    );
+    expect(fakeSpawn.calls[0]?.args[0]).toBe("-ilc");
+  });
+
+  it("skips corrupt base64 Path lines and returns null for an empty Path", async () => {
+    const fallbackSpawn = createFakeShellEnvSpawn({
+      results: [
+        createShellEnvSpawnResult({
+          stdout: [
+            "__BB_SHELL_ENV_START__",
+            "Path=!!!not-base64!!!",
+            `Path=${Buffer.from("C:\\Later", "utf8").toString("base64")}`,
+            "__BB_SHELL_ENV_END__",
+          ].join("\n"),
+        }),
+        createShellEnvSpawnResult({
+          stdout: [
+            "__BB_SHELL_ENV_START__",
+            `Path=${Buffer.from("", "utf8").toString("base64")}`,
+            "__BB_SHELL_ENV_END__",
+          ].join("\n"),
+        }),
+      ],
+    });
+
+    const win32Options = {
+      env: { Path: "C:\\Windows" },
+      platform: "win32" as const,
+      spawnUserShellEnv: fallbackSpawn.spawn,
+    };
+
+    await expect(createUserShellPathResolver(win32Options)()).resolves.toBe(
+      "C:\\Later",
+    );
+    await expect(
+      createUserShellPathResolver(win32Options)(),
+    ).resolves.toBeNull();
+  });
+
+  it("returns null when the PowerShell probe fails on Windows", async () => {
+    const fakeSpawn = createFakeShellEnvSpawn({
+      results: [
+        createShellEnvSpawnResult({
+          status: 1,
+          stderr: "powershell failed",
+        }),
+      ],
+    });
+
+    await expect(
+      createUserShellPathResolver({
+        env: { Path: "C:\\Windows" },
         platform: "win32",
         spawnUserShellEnv: fakeSpawn.spawn,
       })(),
     ).resolves.toBeNull();
 
-    expect(fakeSpawn.calls).toEqual([]);
+    expect(fakeSpawn.calls).toHaveLength(1);
   });
 });
 
@@ -427,6 +599,7 @@ describe("prepareRuntimeShellEnv", () => {
         hostDaemonPort: 3002,
         inheritedPath: "/usr/bin",
         serverUrl: "http://127.0.0.1:3334",
+        platform: "linux",
       }),
     ).toEqual({
       PATH: `/tmp/bb-bin${delimiter}/usr/bin`,
@@ -434,6 +607,29 @@ describe("prepareRuntimeShellEnv", () => {
       BB_SERVER_URL: "http://127.0.0.1:3334",
       BB_HOST_DAEMON_PORT: "3002",
     });
+  });
+
+  it("points BB_CLI at the bb.cmd entry point on win32", () => {
+    expect(
+      prepareRuntimeShellEnv({
+        bbExecutableDirectory: "C:\\bb-bin",
+        hostDaemonPort: 3002,
+        inheritedPath: "C:\\Windows",
+        serverUrl: "http://127.0.0.1:3334",
+        platform: "win32",
+      }),
+    ).toMatchObject({
+      BB_CLI: path.win32.resolve("C:\\bb-bin", "bb.cmd"),
+    });
+  });
+
+  it("resolves bb.cmd inside the executable directory on win32", () => {
+    expect(resolveBbExecutablePathInDirectory("/tmp/bb-bin", "linux")).toBe(
+      path.resolve("/tmp/bb-bin", "bb"),
+    );
+    expect(resolveBbExecutablePathInDirectory("C:\\bb-bin", "win32")).toBe(
+      path.win32.resolve("C:\\bb-bin", "bb.cmd"),
+    );
   });
 
   it("uses an explicit bbExecutablePath for BB_CLI", () => {
@@ -458,6 +654,7 @@ describe("prepareRuntimeShellEnv", () => {
         bbExecutableDirectory: "/tmp/bb-bin",
         hostDaemonPort: 3002,
         serverUrl: "http://127.0.0.1:3334",
+        platform: "linux",
       }),
     ).toEqual({
       PATH: `/tmp/bb-bin${delimiter}/usr/local/bin:/usr/bin`,
@@ -473,6 +670,7 @@ describe("prepareRuntimeShellEnv", () => {
         bbExecutableDirectory: "/tmp/bb-bin",
         inheritedPath: "/usr/bin",
         serverUrl: "http://127.0.0.1:3334",
+        platform: "linux",
       }),
     ).toEqual({
       PATH: `/tmp/bb-bin${delimiter}/usr/bin`,

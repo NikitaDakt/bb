@@ -140,6 +140,7 @@ export function MachineAccessGate({
 
 export interface EnrollmentCommand {
   value: string;
+  powershellValue?: string;
   expiresAt: number;
 }
 
@@ -213,6 +214,7 @@ export function ManualMachineSetup({
                 ? null
                 : {
                     value: enrollment.command,
+                    powershellValue: enrollment.powershellCommand,
                     expiresAt: enrollment.expiresAt,
                   },
             );
@@ -306,6 +308,7 @@ export function ManualMachineSetupView({
         <MachineLaunchCommand
           key={command.value}
           command={command.value}
+          powershellCommand={command.powershellValue}
           expiresAt={command.expiresAt}
           onRegenerate={onRegenerate}
         />
@@ -369,14 +372,20 @@ function formatCountdown(remainingMs: number): string {
 
 export function MachineLaunchCommand({
   command,
+  powershellCommand,
   expiresAt,
   onRegenerate,
 }: {
   command: string;
+  powershellCommand?: string;
   expiresAt: number;
   onRegenerate: () => void;
 }) {
-  const { copied, copy } = useClipboardCopy({ text: command });
+  const [usePowerShell, setUsePowerShell] = useState(false);
+  const selectedCommand = usePowerShell
+    ? (powershellCommand ?? command)
+    : command;
+  const { copied, copy } = useClipboardCopy({ text: selectedCommand });
   const [remaining, setRemaining] = useState(() => expiresAt - Date.now());
   useEffect(() => {
     const timer = setInterval(
@@ -388,8 +397,32 @@ export function MachineLaunchCommand({
   const expired = remaining <= 0;
   return (
     <div className="overflow-hidden rounded-md border border-border bg-muted/30">
+      {powershellCommand === undefined ? null : (
+        <div
+          className="flex gap-2 border-b border-border p-2"
+          role="group"
+          aria-label="Machine operating system"
+        >
+          <Button
+            size="sm"
+            variant={usePowerShell ? "ghost" : "secondary"}
+            aria-pressed={!usePowerShell}
+            onClick={() => setUsePowerShell(false)}
+          >
+            macOS / Linux
+          </Button>
+          <Button
+            size="sm"
+            variant={usePowerShell ? "secondary" : "ghost"}
+            aria-pressed={usePowerShell}
+            onClick={() => setUsePowerShell(true)}
+          >
+            Windows (PowerShell)
+          </Button>
+        </div>
+      )}
       <pre className="overflow-x-auto whitespace-pre-wrap break-all p-3 font-mono text-xs text-foreground">
-        {command}
+        {selectedCommand}
       </pre>
       <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-2">
         {expired ? (

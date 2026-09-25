@@ -486,4 +486,33 @@ describe("buildAcpSessionParams skill instructions", () => {
   it("omits the instructions key entirely when there is nothing to say", () => {
     expect(paramsWithOptions({})).not.toHaveProperty("instructions");
   });
+
+  it("joins Windows-shaped skill roots with backslashes on any host", () => {
+    const params = buildAcpSessionParams({
+      additionalWorkspaceWriteRoots: [],
+      cwd: "C:\\workspace",
+      options: {
+        ...BASE_OPTIONS,
+        skillRoots: [
+          {
+            id: "global-skills:win:acp",
+            skillDirectoryRootPath: "C:\\skills",
+            skills: [{ name: "debugging", description: "Debug." }],
+          },
+        ],
+      },
+      parameterizedModelPicker: false,
+      launchSpec: launchSpecFor({
+        displayName: "Custom ACP",
+        command: "custom-agent",
+        args: ["serve"],
+        env: {},
+      }),
+      providerLabel: "acp-custom",
+      threadId: "thread-1",
+    });
+    expect(params.instructions).toContain(
+      "- debugging: Debug. (SKILL.md: C:\\skills\\debugging\\SKILL.md)",
+    );
+  });
 });

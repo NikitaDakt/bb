@@ -11,6 +11,8 @@ export const serverMoveServiceManagerSchema = z.enum([
   "launchd",
   "systemd-user",
   "systemd-system",
+  "windows-task",
+  "windows-run-key",
   "none",
 ]);
 export type ServerMoveServiceManager = z.infer<

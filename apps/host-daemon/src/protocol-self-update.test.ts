@@ -25,6 +25,7 @@ function logger() {
 async function createFixture(
   args: {
     enabled?: boolean;
+    platform?: NodeJS.Platform;
     protocolVersion?: number;
     installFailure?: Error;
     now?: () => number;
@@ -37,7 +38,16 @@ async function createFixture(
   const installTarball = vi.fn(async () => {
     if (args.installFailure) throw args.installFailure;
   });
-  const runProcess = vi.fn(async () => undefined);
+  const runProcess = vi.fn(
+    async (
+      _command: string,
+      _args: string[],
+      _options: {
+        env: NodeJS.ProcessEnv;
+        platform?: NodeJS.Platform;
+      },
+    ) => undefined,
+  );
   const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.endsWith("/install/version")) {
@@ -57,6 +67,7 @@ async function createFixture(
     dataDir,
     enabled: args.enabled ?? true,
     fetchFn,
+    ...(args.platform === undefined ? {} : { platform: args.platform }),
     ...(args.useDefaultInstaller ? { runProcess } : { installTarball }),
     logger: testLogger,
     now: args.now,
@@ -170,7 +181,10 @@ describe("protocol self-update", () => {
 
   it("finds npm beside the running Node executable when the service PATH omits it", async () => {
     vi.stubEnv("PATH", "/usr/bin:/bin");
-    const test = await createFixture({ useDefaultInstaller: true });
+    const test = await createFixture({
+      platform: "linux",
+      useDefaultInstaller: true,
+    });
 
     await expect(test.updater.handleProtocolMismatch()).resolves.toBe(
       "updated",
@@ -191,6 +205,39 @@ describe("protocol self-update", () => {
         }),
       },
     );
+  });
+
+  it("uses the portable launcher on win32 for npm.cmd", async () => {
+    const test = await createFixture({
+      platform: "win32",
+      useDefaultInstaller: true,
+    });
+
+    await expect(test.updater.handleProtocolMismatch()).resolves.toBe(
+      "updated",
+    );
+
+    expect(test.runProcess).toHaveBeenCalledOnce();
+    expect(test.runProcess).toHaveBeenCalledWith(
+      "npm",
+      expect.arrayContaining(["install"]),
+      expect.objectContaining({ platform: "win32" }),
+    );
+  });
+
+  it("runs npm without a shell on posix", async () => {
+    const test = await createFixture({
+      platform: "linux",
+      useDefaultInstaller: true,
+    });
+
+    await expect(test.updater.handleProtocolMismatch()).resolves.toBe(
+      "updated",
+    );
+
+    expect(test.runProcess).toHaveBeenCalledOnce();
+    const options = test.runProcess.mock.calls[0]?.[2] ?? {};
+    expect("shell" in options).toBe(false);
   });
 
   it("updates an installer-managed bb-app inside its machine-specific prefix", async () => {

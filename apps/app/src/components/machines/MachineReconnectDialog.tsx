@@ -75,6 +75,7 @@ export function MachineReconnectDialog({
           <MachineLaunchCommand
             key={prepared.command}
             command={prepared.command}
+            powershellCommand={prepared.powershellCommand}
             expiresAt={prepared.expiresAt}
             onRegenerate={() => {
               if (hostId !== null) mutate(hostId);

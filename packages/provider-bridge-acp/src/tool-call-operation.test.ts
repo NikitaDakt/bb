@@ -73,6 +73,9 @@ describe("resolveAcpFileChangeWriteScope", () => {
         "/tmp/qa-1719/",
       ]),
     ).toBe("/tmp/qa-1719");
+    expect(
+      resolveAcpFileChangeWriteScope(["C:\\repo\\notes.md", "C:\\repo"]),
+    ).toBe("C:\\repo");
   });
 
   it("normalizes .. segments so a path outside the candidate does not pass a raw prefix test", () => {
@@ -82,6 +85,12 @@ describe("resolveAcpFileChangeWriteScope", () => {
     expect(
       resolveAcpFileChangeWriteScope(["/repo/src/../notes.md", "/repo"]),
     ).toBe("/repo");
+    expect(
+      resolveAcpFileChangeWriteScope([
+        "C:\\repo\\src\\..\\notes.md",
+        "C:\\repo",
+      ]),
+    ).toBe("C:\\repo");
   });
 
   it("returns null for paths in different directories and for a lookalike prefix", () => {
@@ -90,6 +99,12 @@ describe("resolveAcpFileChangeWriteScope", () => {
     ).toBeNull();
     expect(
       resolveAcpFileChangeWriteScope(["/tmp/qa-17190/x", "/tmp/qa-1719"]),
+    ).toBeNull();
+    expect(
+      resolveAcpFileChangeWriteScope(["C:\\a\\notes.md", "C:\\b\\notes.md"]),
+    ).toBeNull();
+    expect(
+      resolveAcpFileChangeWriteScope(["C:\\a\\notes.md", "/tmp/a"]),
     ).toBeNull();
   });
 

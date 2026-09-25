@@ -14,6 +14,11 @@ import {
 
 const EPIPE_PAYLOAD_SIZE = 1024 * 1024;
 
+const WINDOWS_SIGTERM_KILL_IS_UNTRAPPABLE_TERMINATE_PROCESS =
+  process.platform === "win32";
+const WINDOWS_WRITES_TO_CLOSED_CHILD_STDIN_NEVER_FAIL_NOR_FLUSH =
+  process.platform === "win32";
+
 function deferred<T>(): {
   promise: Promise<T>;
   resolve(value: T): void;
@@ -71,6 +76,56 @@ describe("formatAgentError", () => {
 });
 
 describe("ACP agent stdio lifecycle", () => {
+  it.skipIf(process.platform !== "win32")(
+    "terminates a native Windows agent's descendants on cancellation",
+    async () => {
+      const ready = deferred<number>();
+      const exited = deferred<AcpAgentExitInfo>();
+      const connection = createAcpAgentConnection({
+        recordThreadId: null,
+        command: process.execPath,
+        args: [
+          "-e",
+          `const child = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {stdio:'ignore'}); child.once('spawn', () => process.stdout.write(JSON.stringify({jsonrpc:'2.0', method:'ready', params:{pid:child.pid}}) + '\\n')); setInterval(() => {}, 1000);`,
+        ],
+        cwd: process.cwd(),
+        env: process.env,
+        onNotification(method, params) {
+          if (method === "ready")
+            ready.resolve(
+              z.object({ pid: z.number().int().positive() }).parse(params).pid,
+            );
+        },
+        onRequest() {},
+        onExit: exited.resolve,
+      });
+      let descendant: number | undefined;
+      try {
+        descendant = await ready.promise;
+        connection.kill();
+        await connection.waitForExit();
+        await expect
+          .poll(() => {
+            try {
+              process.kill(descendant!, 0);
+              return true;
+            } catch {
+              return false;
+            }
+          })
+          .toBe(false);
+      } finally {
+        if (descendant !== undefined) {
+          try {
+            process.kill(descendant, "SIGKILL");
+          } catch {}
+        }
+        await stopConnection(connection, exited.promise);
+      }
+    },
+    15_000,
+  );
+
   it("does not surface a closed agent stdin as an unhandled EPIPE", async () => {
     const ready = deferred<void>();
     const exited = deferred<AcpAgentExitInfo>();
@@ -105,62 +160,65 @@ describe("ACP agent stdio lifecycle", () => {
     }
   });
 
-  it("rejects requests and stops an agent that closes stdin but stays alive", async () => {
-    const ready = deferred<void>();
-    const exited = deferred<AcpAgentExitInfo>();
-    const connection = createAcpAgentConnection({
-      recordThreadId: null,
-      command: process.execPath,
-      args: [
-        "-e",
-        [
-          'require("node:fs").closeSync(0);',
-          'process.stdout.write(JSON.stringify({ jsonrpc: "2.0", method: "ready" }) + "\\n");',
-          "setInterval(() => {}, 1000);",
-        ].join(" "),
-      ],
-      cwd: process.cwd(),
-      env: process.env,
-      onNotification(method) {
-        if (method === "ready") ready.resolve();
-      },
-      onRequest() {},
-      onExit: exited.resolve,
-    });
-
-    try {
-      await ready.promise;
-      const pendingRequest = connection.request({
-        method: "fixture/pending",
-        params: { payload: "x".repeat(EPIPE_PAYLOAD_SIZE) },
-        resultSchema: z.unknown(),
+  it.skipIf(WINDOWS_WRITES_TO_CLOSED_CHILD_STDIN_NEVER_FAIL_NOR_FLUSH)(
+    "rejects requests and stops an agent that closes stdin but stays alive",
+    async () => {
+      const ready = deferred<void>();
+      const exited = deferred<AcpAgentExitInfo>();
+      const connection = createAcpAgentConnection({
+        recordThreadId: null,
+        command: process.execPath,
+        args: [
+          "-e",
+          [
+            'require("node:fs").closeSync(0);',
+            'process.stdout.write(JSON.stringify({ jsonrpc: "2.0", method: "ready" }) + "\\n");',
+            "setInterval(() => {}, 1000);",
+          ].join(" "),
+        ],
+        cwd: process.cwd(),
+        env: process.env,
+        onNotification(method) {
+          if (method === "ready") ready.resolve();
+        },
+        onRequest() {},
+        onExit: exited.resolve,
       });
-      const requestWithDeadline = Promise.race([
-        pendingRequest,
-        delay(500).then(() => {
-          throw new Error("ACP request remained pending after stdin closed");
-        }),
-      ]);
 
-      await expect(requestWithDeadline).rejects.toBeInstanceOf(
-        AcpAgentExitedError,
-      );
-      expect(connection.exited).toBe(true);
-      await expect(
-        connection.request({
-          method: "fixture/future",
-          params: null,
+      try {
+        await ready.promise;
+        const pendingRequest = connection.request({
+          method: "fixture/pending",
+          params: { payload: "x".repeat(EPIPE_PAYLOAD_SIZE) },
           resultSchema: z.unknown(),
-        }),
-      ).rejects.toBeInstanceOf(AcpAgentExitedError);
-      await expect(exited.promise).resolves.toMatchObject({
-        code: null,
-        signal: null,
-      });
-    } finally {
-      await stopConnection(connection, exited.promise);
-    }
-  });
+        });
+        const requestWithDeadline = Promise.race([
+          pendingRequest,
+          delay(500).then(() => {
+            throw new Error("ACP request remained pending after stdin closed");
+          }),
+        ]);
+
+        await expect(requestWithDeadline).rejects.toBeInstanceOf(
+          AcpAgentExitedError,
+        );
+        expect(connection.exited).toBe(true);
+        await expect(
+          connection.request({
+            method: "fixture/future",
+            params: null,
+            resultSchema: z.unknown(),
+          }),
+        ).rejects.toBeInstanceOf(AcpAgentExitedError);
+        await expect(exited.promise).resolves.toMatchObject({
+          code: null,
+          signal: null,
+        });
+      } finally {
+        await stopConnection(connection, exited.promise);
+      }
+    },
+  );
 
   it("makes an intentionally stopped connection unavailable before stdin teardown", async () => {
     const ready = deferred<void>();
@@ -224,10 +282,11 @@ describe("ACP agent stdio lifecycle", () => {
           resultSchema: z.unknown(),
         }),
       ).rejects.toThrow(`ACP agent "${process.execPath}" is not running`);
-      await expect(exited.promise).resolves.toMatchObject({
-        code: 0,
-        signal: null,
-      });
+      await expect(exited.promise).resolves.toMatchObject(
+        WINDOWS_SIGTERM_KILL_IS_UNTRAPPABLE_TERMINATE_PROCESS
+          ? { code: null, signal: "SIGTERM" }
+          : { code: 0, signal: null },
+      );
     } finally {
       await stopConnection(connection, exited.promise);
     }
@@ -274,6 +333,97 @@ describe("ACP agent stdio lifecycle", () => {
       rmSync(workspace, { recursive: true });
     }
   });
+
+  it("reaps the killed agent before waitForExit resolves so its cwd can be removed", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "bb-acp-wait-exit-"));
+    const exited = deferred<AcpAgentExitInfo>();
+    const connection = createAcpAgentConnection({
+      recordThreadId: null,
+      command: process.execPath,
+      args: ["-e", "setInterval(() => {}, 1000);"],
+      cwd: workspace,
+      env: process.env,
+      onNotification() {},
+      onRequest() {},
+      onExit: exited.resolve,
+    });
+
+    try {
+      connection.kill();
+      await connection.waitForExit();
+      rmSync(workspace, { recursive: true, force: true });
+      expect(existsSync(workspace)).toBe(false);
+      await exited.promise;
+    } finally {
+      await stopConnection(connection, exited.promise);
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves waitForExit when the agent exits on its own", async () => {
+    const exited = deferred<AcpAgentExitInfo>();
+    const connection = createAcpAgentConnection({
+      recordThreadId: null,
+      command: process.execPath,
+      args: ["-e", "process.exit(3);"],
+      cwd: process.cwd(),
+      env: process.env,
+      onNotification() {},
+      onRequest() {},
+      onExit: exited.resolve,
+    });
+
+    await connection.waitForExit();
+    await expect(exited.promise).resolves.toMatchObject({
+      code: 3,
+      signal: null,
+    });
+  });
+
+  it.skipIf(WINDOWS_SIGTERM_KILL_IS_UNTRAPPABLE_TERMINATE_PROCESS)(
+    "escalates to SIGKILL when the agent traps SIGTERM",
+    async () => {
+      const ready = deferred<void>();
+      const exited = deferred<AcpAgentExitInfo>();
+      const connection = createAcpAgentConnection({
+        recordThreadId: null,
+        command: process.execPath,
+        args: [
+          "-e",
+          [
+            'process.on("SIGTERM", () => {});',
+            'process.stdout.write(JSON.stringify({ jsonrpc: "2.0", method: "ready" }) + "\\n");',
+            "setInterval(() => {}, 1000);",
+          ].join(" "),
+        ],
+        cwd: process.cwd(),
+        env: process.env,
+        onNotification(method) {
+          if (method === "ready") ready.resolve();
+        },
+        onRequest() {},
+        onExit: exited.resolve,
+      });
+
+      try {
+        await ready.promise;
+        connection.kill();
+        const reapedAfterSigterm = await Promise.race([
+          connection.waitForExit().then(() => true),
+          delay(300).then(() => false),
+        ]);
+        expect(reapedAfterSigterm).toBe(false);
+        connection.kill("SIGKILL");
+        await connection.waitForExit();
+        await expect(exited.promise).resolves.toMatchObject({
+          code: null,
+          signal: "SIGKILL",
+        });
+      } finally {
+        await stopConnection(connection, exited.promise);
+      }
+    },
+  );
 
   it("rejects pending requests when the agent exits", async () => {
     const exited = deferred<AcpAgentExitInfo>();

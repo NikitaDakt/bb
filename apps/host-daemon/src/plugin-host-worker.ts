@@ -2,7 +2,7 @@ import { z } from "zod";
 import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const HOST_WORKER_PROTOCOL_VERSION = 2;
+const HOST_WORKER_PROTOCOL_VERSION = 3;
 function createOperationEnvironmentScope(target: NodeJS.ProcessEnv) {
   let active = 0;
   let current: Record<string, string> = {};
@@ -594,6 +594,7 @@ process.once("disconnect", () => void dispose());
 if (!process.connected) void dispose();
 
 try {
+  process.env.BB_HOST_WORKER_PID = String(process.pid);
   const imported = await import(pathToFileURL(artifactPath).href);
   if (disposing) process.exit(0);
   entry = parseEntry(imported.default);

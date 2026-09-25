@@ -93,6 +93,31 @@ const electronBuilderFilePatternSchema = z.union([
   electronBuilderFileSetSchema,
 ]);
 
+const windowsConfigSchema = z
+  .object({
+    artifactName: z.literal("wbb-Setup-${version}.exe"),
+    icon: z.string().min(1),
+    target: z.tuple([
+      z
+        .object({
+          arch: z.tuple([z.literal("x64")]),
+          target: z.literal("nsis"),
+        })
+        .passthrough(),
+    ]),
+  })
+  .passthrough();
+
+const nsisConfigSchema = z
+  .object({
+    allowToChangeInstallationDirectory: z.literal(true),
+    createDesktopShortcut: z.literal(true),
+    oneClick: z.literal(false),
+    perMachine: z.literal(false),
+    shortcutName: z.string().min(1),
+  })
+  .passthrough();
+
 const electronBuilderConfigSchema = z
   .object({
     afterPack: z.string().min(1),
@@ -105,7 +130,9 @@ const electronBuilderConfigSchema = z
     files: z.array(electronBuilderFilePatternSchema),
     linux: linuxConfigSchema,
     mac: macConfigSchema,
+    nsis: nsisConfigSchema,
     npmRebuild: z.literal(false),
+    win: windowsConfigSchema,
     appId: z.string().min(1),
     artifactName: z.string().min(1),
     productName: z.string().min(1),
@@ -170,9 +197,11 @@ type CreateScriptEnvironment = (
 ) => NodeJS.ProcessEnv;
 type RunConfigScript = (
   overrides: EnvironmentOverrides,
+  extraArgs?: string[],
 ) => Promise<ScriptRunResult>;
 type ReadResolvedConfig = (
   overrides: EnvironmentOverrides,
+  extraArgs?: string[],
 ) => Promise<ReadResolvedConfigResult>;
 type RunNativePrepScript = (
   appOutDir: string,
@@ -197,10 +226,10 @@ const createScriptEnvironment: CreateScriptEnvironment = (overrides) => {
   return env;
 };
 
-const runConfigScript: RunConfigScript = async (overrides) => {
+const runConfigScript: RunConfigScript = async (overrides, extraArgs = []) => {
   const child = spawn(
     process.execPath,
-    ["scripts/run-electron-builder.mjs", "--print-config"],
+    ["scripts/run-electron-builder.mjs", "--print-config", ...extraArgs],
     {
       cwd: desktopPackageRoot,
       env: createScriptEnvironment(overrides),
@@ -259,8 +288,11 @@ const runNativePrepScript: RunNativePrepScript = async (
   };
 };
 
-const readResolvedConfig: ReadResolvedConfig = async (overrides) => {
-  const result = await runConfigScript(overrides);
+const readResolvedConfig: ReadResolvedConfig = async (
+  overrides,
+  extraArgs = [],
+) => {
+  const result = await runConfigScript(overrides, extraArgs);
 
   expect(result.exitCode).toBe(0);
   return {
@@ -344,6 +376,21 @@ describe("electron-builder signing config", () => {
       "--target=44.3.0",
       "--arch=x64",
       "--platform=linux",
+    ]);
+  });
+
+  it("passes the Windows platform through to better-sqlite3 prebuild-install", () => {
+    expect(
+      nativeModulesScript.resolveBetterSqlite3PrebuildArguments({
+        arch: "x64",
+        electronVersion: "41.7.0",
+        platform: "win32",
+      }),
+    ).toEqual([
+      "--runtime=electron",
+      "--target=41.7.0",
+      "--arch=x64",
+      "--platform=win32",
     ]);
   });
 
@@ -460,8 +507,13 @@ describe("electron-builder signing config", () => {
       await expect(readFile(unixTerminalPath, "utf8")).resolves.toContain(
         "helperPath.replace(/app\\.asar(?!\\.unpacked)/g, 'app.asar.unpacked')",
       );
-      expect((await stat(helperPath)).mode & 0o777).toBe(0o755);
-      expect((await stat(rebuiltHelperPath)).mode & 0o777).toBe(0o755);
+      if (process.platform === "win32") {
+        await expect(access(helperPath)).resolves.toBeUndefined();
+        await expect(access(rebuiltHelperPath)).resolves.toBeUndefined();
+      } else {
+        expect((await stat(helperPath)).mode & 0o777).toBe(0o755);
+        expect((await stat(rebuiltHelperPath)).mode & 0o777).toBe(0o755);
+      }
     } finally {
       await rm(appOutDir, { force: true, recursive: true });
     }
@@ -558,6 +610,121 @@ describe("electron-builder signing config", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("packages a Windows NSIS installer for x64", async () => {
+    const configText = await readFile(
+      resolve(desktopPackageRoot, "electron-builder.config.json"),
+      "utf8",
+    );
+    const config = electronBuilderConfigSchema.parse(JSON.parse(configText));
+
+    expect(config.win).toMatchObject({
+      artifactName: "wbb-Setup-${version}.exe",
+      icon: "assets/icon.ico",
+      target: [{ arch: ["x64"], target: "nsis" }],
+    });
+    expect(config.nsis).toMatchObject({
+      allowToChangeInstallationDirectory: true,
+      createDesktopShortcut: true,
+      oneClick: false,
+      perMachine: false,
+      shortcutName: "wbb",
+    });
+    await expect(
+      access(resolve(desktopPackageRoot, config.win.icon)),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(resolve(desktopPackageRoot, "assets/icon-nightly.ico")),
+    ).resolves.toBeUndefined();
+  });
+
+  it("tolerates a Windows node-pty layout without a spawn helper", async () => {
+    const appOutDir = await mkdtemp(
+      resolve(tmpdir(), "bb-desktop-native-modules-win-"),
+    );
+    const nodePtyPackageDir = resolve(
+      appOutDir,
+      "resources",
+      "app.asar.unpacked",
+      "node_modules",
+      "node-pty",
+    );
+    const unixTerminalPath = resolve(
+      nodePtyPackageDir,
+      "lib",
+      "unixTerminal.js",
+    );
+
+    try {
+      await mkdir(resolve(nodePtyPackageDir, "prebuilds", "win32-x64"), {
+        recursive: true,
+      });
+      await writeFile(
+        resolve(nodePtyPackageDir, "prebuilds", "win32-x64", "conpty.node"),
+        "conpty",
+      );
+      await mkdir(dirname(unixTerminalPath), { recursive: true });
+      await writeFile(
+        unixTerminalPath,
+        "helperPath = helperPath.replace('app.asar', 'app.asar.unpacked');",
+      );
+      const result = await runNativePrepScript(appOutDir);
+
+      expect(result.exitCode).toBe(0);
+      await expect(readFile(unixTerminalPath, "utf8")).resolves.toContain(
+        "helperPath.replace(/app\\.asar(?!\\.unpacked)/g, 'app.asar.unpacked')",
+      );
+    } finally {
+      await rm(appOutDir, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps the shared macOS and Linux identity without --win", async () => {
+    const { config } = await readResolvedConfig({});
+
+    expect(config.appId).toBe("dev.bb.desktop");
+    expect(config.productName).toBe("bb");
+    expect(config.artifactName).toBe(
+      "${productName}-${version}-${arch}.${ext}",
+    );
+  });
+
+  it("uses the wbb identity for Windows builds only", async () => {
+    const { config } = await readResolvedConfig({}, ["--win", "--x64"]);
+
+    expect(config.appId).toBe("cl.bb.wn");
+    expect(config.productName).toBe("wbb");
+    expect(config.artifactName).toBe(
+      "${productName}-${version}-${arch}.${ext}",
+    );
+    expect(config.win).toMatchObject({
+      artifactName: "wbb-Setup-${version}.exe",
+      icon: "assets/icon.ico",
+      target: [{ arch: ["x64"], target: "nsis" }],
+    });
+    expect(config.nsis).toMatchObject({
+      allowToChangeInstallationDirectory: true,
+      createDesktopShortcut: true,
+      oneClick: false,
+      perMachine: false,
+      shortcutName: "wbb",
+    });
+  });
+
+  it("uses the wbb nightly identity for Windows nightly builds", async () => {
+    const { config } = await readResolvedConfig(
+      {
+        BB_DESKTOP_RELEASE_CHANNEL: "nightly",
+      },
+      ["--win", "--x64"],
+    );
+
+    expect(config.appId).toBe("cl.bb.wn.nightly");
+    expect(config.productName).toBe("wbb Nightly");
+    expect(config.win.icon).toBe("assets/icon-nightly.ico");
+    expect(config.win.artifactName).toBe("wbb-Setup-${version}.exe");
+    expect(config.nsis.shortcutName).toBe("wbb Nightly");
+  });
+
   it("grants audio input to the signed app and helper processes", async () => {
     const configText = await readFile(
       resolve(desktopPackageRoot, "electron-builder.config.json"),
@@ -590,6 +757,47 @@ describe("electron-builder signing config", () => {
     expect(DESKTOP_AUTO_UPDATE_FEED_CONFIG.url).toBe(
       "https://github.com/get-bb/bb/releases/download/desktop-latest/",
     );
+  });
+
+  it("resolves the shared update feed for non-Windows builds", async () => {
+    const { config } = await readResolvedConfig({});
+
+    expect(config.publish).toEqual([
+      {
+        channel: "latest",
+        provider: "generic",
+        url: "https://github.com/get-bb/bb/releases/download/desktop-latest/",
+      },
+    ]);
+  });
+
+  it("resolves the Windows update feed inside the desktop-win namespace", async () => {
+    const { config } = await readResolvedConfig({}, ["--win", "--x64"]);
+
+    expect(config.publish).toEqual([
+      {
+        channel: "latest",
+        provider: "generic",
+        url: "https://github.com/get-bb/bb/releases/download/desktop-win-latest/",
+      },
+    ]);
+  });
+
+  it("resolves the Windows nightly update feed inside the desktop-win namespace", async () => {
+    const { config } = await readResolvedConfig(
+      {
+        BB_DESKTOP_RELEASE_CHANNEL: "nightly",
+      },
+      ["--win", "--x64"],
+    );
+
+    expect(config.publish).toEqual([
+      {
+        channel: "nightly",
+        provider: "generic",
+        url: "https://github.com/get-bb/bb/releases/download/desktop-win-nightly/",
+      },
+    ]);
   });
 
   it("creates a separate nightly app identity and update feed", async () => {

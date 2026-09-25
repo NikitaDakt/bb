@@ -1,9 +1,9 @@
-import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { experimental_createHostEntryHarness } from "@get-bb/plugin-sdk/testing/host";
+import { experimental_spawnPortableOutputProcess } from "@get-bb/plugin-sdk/host";
 import { afterEach, describe, expect, it } from "vitest";
 import { createPersonalWorkspaceHostEntry } from "./host.js";
 
@@ -48,10 +48,12 @@ describe("personal workspace host entry", () => {
     const created = await harness.experimental_call("createWorkspace", {
       pathKey: "thr_busy",
     });
-    const child = spawn("sleep", ["300"], {
+    const child = experimental_spawnPortableOutputProcess({
+      command: process.execPath,
+      args: ["-e", "setInterval(() => {}, 1000)"],
       cwd: created.path,
       detached: true,
-      stdio: "ignore",
+      env: process.env,
     });
     child.unref();
 

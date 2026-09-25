@@ -4,15 +4,14 @@ import type {
   ReasoningLevel,
   ServiceTier,
 } from "@bb/domain";
-import path from "node:path";
-
+import { cursorParameterizedSelection } from "./cursor-model-selection.js";
+import { agentPathFlavorForAnchor } from "./agent-paths.js";
 import {
   ACP_DEFAULT_MODEL_ID,
   type AcpBridgeNativeReasoning,
   type AcpBridgePermissionCli,
   type AcpBridgeReasoningCli,
 } from "./bridge-protocol.js";
-import { cursorParameterizedSelection } from "./cursor-model-selection.js";
 import type { AcpLaunchSpec } from "./launch-spec.js";
 
 export interface AcpSessionExecutionOptions {
@@ -98,11 +97,9 @@ function buildAcpSkillsInstructions(
 
   const skillLines = skillRoots.flatMap((skillRoot) => {
     return skillRoot.skills.map((skill) => {
-      const skillFilePath = path.join(
+      const skillFilePath = agentPathFlavorForAnchor(
         skillRoot.skillDirectoryRootPath,
-        skill.name,
-        "SKILL.md",
-      );
+      ).join(skillRoot.skillDirectoryRootPath, skill.name, "SKILL.md");
       return `- ${skill.name}: ${sanitizeAcpSkillDescription(skill.description)} (SKILL.md: ${skillFilePath})`;
     });
   });

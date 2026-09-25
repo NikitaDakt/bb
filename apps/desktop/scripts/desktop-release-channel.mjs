@@ -21,9 +21,12 @@ export function resolveDesktopBuildPlatform(nodePlatform) {
   if (nodePlatform === "linux") {
     return "linux";
   }
+  if (nodePlatform === "win32") {
+    return "windows";
+  }
 
   throw new Error(
-    `Desktop builds support darwin and linux only, got ${nodePlatform}.`,
+    `Desktop builds support darwin, linux and win32, got ${nodePlatform}.`,
   );
 }
 
@@ -42,7 +45,13 @@ export function createDesktopReleaseConfig(channel) {
       updateMetadataFileNames: {
         linux: "nightly-linux.yml",
         macos: "nightly-mac.yml",
+        windows: "nightly.yml",
       },
+      windowsReleaseTag: "desktop-win-nightly",
+      windowsAppId: "cl.bb.wn.nightly",
+      windowsApplicationName: "wbb Nightly",
+      windowsArtifactName: "wbb-Setup-${version}.exe",
+      windowsIconPath: "assets/icon-nightly.ico",
     };
   }
 
@@ -57,10 +66,28 @@ export function createDesktopReleaseConfig(channel) {
     updateMetadataFileNames: {
       linux: "latest-linux.yml",
       macos: "latest-mac.yml",
+      windows: "latest.yml",
     },
+    windowsReleaseTag: "desktop-win-latest",
+    windowsAppId: "cl.bb.wn",
+    windowsApplicationName: "wbb",
+    windowsArtifactName: "wbb-Setup-${version}.exe",
+    windowsIconPath: "assets/icon.ico",
   };
 }
 
-export function createDesktopUpdateReleaseBaseUrl(releaseTag) {
-  return `https://github.com/get-bb/bb/releases/download/${releaseTag}/`;
+export function createDesktopUpdateReleaseBaseUrl(
+  releaseTag,
+  repository = "get-bb/bb",
+) {
+  if (
+    !/^[A-Za-z0-9_-][A-Za-z0-9_.-]*\/[A-Za-z0-9_-][A-Za-z0-9_.-]*$/u.test(
+      repository,
+    )
+  ) {
+    throw new Error(
+      "BB_DESKTOP_RELEASE_REPOSITORY must be a GitHub owner/repository.",
+    );
+  }
+  return `https://github.com/${repository}/releases/download/${releaseTag}/`;
 }

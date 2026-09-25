@@ -30,6 +30,7 @@ const HOST_DEPENDENCIES = [
 ] as const;
 const HOST_DAEMON_FILES = [
   "bb",
+  "bb.cmd",
   "bb-parcel-watcher-child.mjs",
   "bb-plugin-host-worker.mjs",
   "bb-provider-bridge-worker.mjs",

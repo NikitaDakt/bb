@@ -90,7 +90,11 @@ export function withManualMachineProvider(
 export async function manualHostCommand(
   enrollments: MachineEnrollmentService,
   hostId: string,
-): Promise<{ command: string; expiresAt: number } | null> {
+): Promise<{
+  command: string;
+  powershellCommand: string;
+  expiresAt: number;
+} | null> {
   const bootstrap = await enrollments.pendingBootstrapForHost({
     hostId,
     owner: MANUAL_PROVIDER_OWNER,
@@ -99,6 +103,7 @@ export async function manualHostCommand(
     ? null
     : {
         command: manualEnrollmentCommand(bootstrap),
+        powershellCommand: manualEnrollmentCommand(bootstrap, "powershell"),
         expiresAt: bootstrap.expiresAt,
       };
 }

@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { ServiceDefinition } from "./service-definition.js";
 
@@ -53,6 +53,7 @@ export const defaultServerMoveCommandRunner: ServerMoveCommandRunner = async (
   await execFileAsync(command, [...args], {
     env: process.env,
     timeout: SERVICE_COMMAND_TIMEOUT_MS,
+    windowsHide: true,
   });
 };
 
@@ -64,6 +65,7 @@ export const defaultDetachedProcessSpawner: DetachedProcessSpawner = (
   try {
     const child = spawn(request.command, request.args, {
       detached: true,
+      windowsHide: true,
       env: request.env,
       stdio: ["ignore", fd, fd],
     });
@@ -88,6 +90,27 @@ function systemdScopeFlag(definition: ServiceDefinition): string {
 }
 
 export async function restartService(args: RestartServiceArgs): Promise<void> {
+  if (
+    args.definition.manager === "windows-task" ||
+    args.definition.manager === "windows-run-key"
+  ) {
+    const dataDir = args.definition.environment.BB_DATA_DIR;
+    if (dataDir === undefined)
+      throw new Error("The Windows service has no data directory");
+    const installer = join(
+      dirname(args.definition.path),
+      "install-machine.ps1",
+    );
+    const helper = `Start-Sleep -Seconds 1; & '${installer.replaceAll("'", "''")}' -Restart -DataDir '${dataDir.replaceAll("'", "''")}'`;
+    const encoded = Buffer.from(helper, "utf16le").toString("base64");
+    await args.runCommand("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      `$ErrorActionPreference='Stop'; $exe=Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'; $child=Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=('"'+$exe+'" -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand ${encoded}')}; if ($child.ReturnValue -ne 0) { throw 'Could not launch the machine service restart helper' }`,
+    ]);
+    return;
+  }
   if (args.definition.manager === "launchd") {
     await args.spawnDetached({
       command: "/bin/sh",

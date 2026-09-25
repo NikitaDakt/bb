@@ -1282,13 +1282,17 @@ unexpected-exit recovery without feature-specific core hooks.
 **Audit before stabilizing.**
 
 0a. **Process reap.** `experimental_killProcessesWithCwdUnder({ directory,
-   graceMs? })` from `@get-bb/plugin-sdk/host` is the same helper bb's own
-daemon used to reap a managed workspace before removing it: SIGTERM to
-every process whose working directory is at or under the path, SIGKILL
-after the grace, returning what it signalled. Published for the worktree
-and environment-personal-workspace plugins, which own their teardown and call it
-before deleting the directory. Confirm the platform coverage (Linux
-`/proc`, macOS `lsof`) and whether the grace should be per call.
+   graceMs? })` from `@get-bb/plugin-sdk/host` reaps processes before the worktree
+and personal-workspace providers remove their directories. POSIX discovers
+working directories through Linux `/proc` or macOS `lsof`, sending SIGTERM
+then SIGKILL after the grace. Windows uses recorded spawn directories and
+native `taskkill /T /F`, never command-line path matches alone. In a Windows
+host worker the helper also requests cleanup from the daemon over its existing
+IPC channel, covering the daemon's provider and terminal roots; standalone
+calls cover only their own registered roots. Results contain the signalled
+processes, and daemon failures abort teardown. Confirm native cross-worker
+cleanup, descendants orphaned before enumeration, PID reuse and grace policy
+before stabilizing. Providers must stop active work before deleting a workspace.
 
 0. **Call timeout.** `ExperimentalHostCallOptions.timeoutMs` (default 30s,
    capped at 30 minutes) lets a plugin run a long host call — a setup
@@ -2716,17 +2720,17 @@ reimplementing it, and `indicatorLabel` carries the matching accessible string.
    returning `null` for "lookup failed" (rather than an error) is the right
    failure for a row that should simply show nothing.
 10. **`experimental_useSidebarThreadSplit`.** Gives a custom row the built-in
-   drag-to-split gesture: spread `splitProps` onto the row, gate any affordance
-   on `isAvailable`, and read `layout` to paint where the thread already sits.
-   The host owns every rule — the drag engages only after the pointer leaves the
-   sidebar, an edge drop splits, a center drop replaces, an open thread focuses
-   its pane, and the pane cap turns a split into a replace — so a plugin cannot
-   reach a layout the built-in sidebar cannot. Before stabilizing, confirm: a
-   list with its own pointer-drag (reorder, swipe) still composes with the
-   host's engage threshold; `splitProps` staying an open object is the right
-   forward-compatible shape, or it should narrow to a named handler; and
-   exposing the full `panes` array does not leak more layout state than a row
-   needs.
+    drag-to-split gesture: spread `splitProps` onto the row, gate any affordance
+    on `isAvailable`, and read `layout` to paint where the thread already sits.
+    The host owns every rule — the drag engages only after the pointer leaves the
+    sidebar, an edge drop splits, a center drop replaces, an open thread focuses
+    its pane, and the pane cap turns a split into a replace — so a plugin cannot
+    reach a layout the built-in sidebar cannot. Before stabilizing, confirm: a
+    list with its own pointer-drag (reorder, swipe) still composes with the
+    host's engage threshold; `splitProps` staying an open object is the right
+    forward-compatible shape, or it should narrow to a named handler; and
+    exposing the full `panes` array does not leak more layout state than a row
+    needs.
 
 ## `app.slots.experimental_threadHeaderAction` (`@get-bb/plugin-sdk/app`)
 

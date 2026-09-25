@@ -1,6 +1,7 @@
+import { createDesktopUpdateReleaseBaseUrl } from "../scripts/desktop-release-channel.mjs";
 import {
   createBbDesktopVersionFeedFileName,
-  type BbDesktopVersionFeedPlatform,
+  type BbDesktopInfo,
 } from "@bb/desktop-contract";
 
 type DesktopReleaseChannel = "latest" | "nightly";
@@ -11,20 +12,34 @@ interface DesktopReleaseInfo {
   iconFileName: "icon.png" | "icon-nightly.png";
   releaseTag: "desktop-latest" | "desktop-nightly";
   updateReleaseBaseUrl: string;
+  windowsReleaseTag: "desktop-win-latest" | "desktop-win-nightly";
+  windowsUpdateReleaseBaseUrl: string;
 }
 
 export function createDesktopReleaseInfo(
   channel: DesktopReleaseChannel,
+  repository = process.env.BB_DESKTOP_RELEASE_REPOSITORY ?? "get-bb/bb",
 ): DesktopReleaseInfo {
   const nightly = channel === "nightly";
   const releaseTag = nightly ? "desktop-nightly" : "desktop-latest";
+  const windowsReleaseTag = nightly
+    ? "desktop-win-nightly"
+    : "desktop-win-latest";
 
   return {
     applicationName: nightly ? "bb Nightly" : "bb",
     channel,
     iconFileName: nightly ? "icon-nightly.png" : "icon.png",
     releaseTag,
-    updateReleaseBaseUrl: `https://github.com/get-bb/bb/releases/download/${releaseTag}/`,
+    updateReleaseBaseUrl: createDesktopUpdateReleaseBaseUrl(
+      releaseTag,
+      repository,
+    ),
+    windowsReleaseTag,
+    windowsUpdateReleaseBaseUrl: createDesktopUpdateReleaseBaseUrl(
+      windowsReleaseTag,
+      repository,
+    ),
   };
 }
 
@@ -52,16 +67,54 @@ export const DESKTOP_RELEASE_INFO = createDesktopReleaseInfo(
 const DESKTOP_UPDATE_RELEASE_BASE_URL =
   DESKTOP_RELEASE_INFO.updateReleaseBaseUrl;
 
-export function createDesktopUpdateFeedUrl(
-  platform: BbDesktopVersionFeedPlatform,
+export function createDesktopUpdateFeedUrlForChannel(
+  platform: BbDesktopInfo["platform"],
+  channel: DesktopReleaseChannel,
 ): string {
-  return `${DESKTOP_UPDATE_RELEASE_BASE_URL}${createBbDesktopVersionFeedFileName(platform)}`;
+  const releaseInfo = createDesktopReleaseInfo(channel);
+  if (platform === "windows") {
+    return `${releaseInfo.windowsUpdateReleaseBaseUrl}${createBbDesktopVersionFeedFileName(platform)}`;
+  }
+  return `${releaseInfo.updateReleaseBaseUrl}${createBbDesktopVersionFeedFileName(platform)}`;
+}
+
+export function createDesktopUpdateFeedUrl(
+  platform: BbDesktopInfo["platform"],
+): string {
+  return createDesktopUpdateFeedUrlForChannel(
+    platform,
+    DESKTOP_RELEASE_CHANNEL,
+  );
 }
 
 export interface DesktopAutoUpdateFeedConfig {
   channel: DesktopReleaseChannel;
   provider: "generic";
   url: string;
+}
+
+export function createDesktopAutoUpdateFeedConfigForChannel(
+  platform: BbDesktopInfo["platform"],
+  channel: DesktopReleaseChannel,
+): DesktopAutoUpdateFeedConfig {
+  const releaseInfo = createDesktopReleaseInfo(channel);
+  return {
+    channel,
+    provider: "generic",
+    url:
+      platform === "windows"
+        ? releaseInfo.windowsUpdateReleaseBaseUrl
+        : releaseInfo.updateReleaseBaseUrl,
+  };
+}
+
+export function createDesktopAutoUpdateFeedConfig(
+  platform: BbDesktopInfo["platform"],
+): DesktopAutoUpdateFeedConfig {
+  return createDesktopAutoUpdateFeedConfigForChannel(
+    platform,
+    DESKTOP_RELEASE_CHANNEL,
+  );
 }
 
 export const DESKTOP_AUTO_UPDATE_FEED_CONFIG: DesktopAutoUpdateFeedConfig = {
@@ -78,13 +131,17 @@ interface DesktopUpdateSupport {
 interface ResolveDesktopUpdateSupportArgs {
   canReplaceAppImage: (appImagePath: string) => boolean;
   env: NodeJS.ProcessEnv;
-  platform: BbDesktopVersionFeedPlatform;
+  platform: BbDesktopInfo["platform"];
 }
 
 export function resolveDesktopUpdateSupport(
   args: ResolveDesktopUpdateSupportArgs,
 ): DesktopUpdateSupport {
   if (args.platform === "macos") {
+    return { autoUpdate: true, versionCheck: true };
+  }
+
+  if (args.platform === "windows") {
     return { autoUpdate: true, versionCheck: true };
   }
 

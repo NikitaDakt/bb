@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import {
   cp,
@@ -55,6 +55,42 @@ const BUILTIN_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
 export function isCommitSha(ref: string): boolean {
   return COMMIT_SHA_PATTERN.test(ref);
+}
+
+const LOCAL_DRIVE_PATH_PATTERN = /^[a-zA-Z]:[\\/]/;
+
+function isLocalAbsolutePath(value: string): boolean {
+  return (
+    value.startsWith("/") ||
+    value.startsWith("\\\\") ||
+    LOCAL_DRIVE_PATH_PATTERN.test(value)
+  );
+}
+
+function localGitCachePath(value: string): string {
+  const normalized = value
+    .replace(/\\/g, "/")
+    .replace(/^([a-zA-Z]):/, "$1")
+    .replace(/\/+$/, "")
+    .replace(/\.git$/, "");
+  const digest = createHash("sha256")
+    .update(normalized)
+    .digest("hex")
+    .slice(0, 16);
+  const rawBase =
+    normalized
+      .split("/")
+      .filter((part) => part.length > 0)
+      .pop() ?? "";
+  const sanitized = rawBase
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32)
+    .replace(/^-+|-+$/g, "");
+  if (sanitized.length === 0 || sanitized === "." || sanitized === "..") {
+    return `local/${digest}`;
+  }
+  return `local/${sanitized}-${digest}`;
 }
 
 function assertSafeSegments(value: string, label: string): void {
@@ -170,7 +206,7 @@ function parseGitSource(spec: string): ParsedPluginSource {
   } catch {
     throw new Error(`invalid git url "${urlish}"`);
   }
-  if (decodedUrlish.split("/").some((segment) => segment === "..")) {
+  if (decodedUrlish.split(/[/\\]/).some((segment) => segment === "..")) {
     throw new Error(`invalid git repository path "${urlish}"`);
   }
   if (/^https?:\/\//.test(urlish)) {
@@ -178,10 +214,10 @@ function parseGitSource(spec: string): ParsedPluginSource {
     url = urlish;
     host = parsed.host;
     repoPath = parsed.pathname.replace(/^\/+|\/+$/g, "").replace(/\.git$/, "");
-  } else if (urlish.startsWith("/")) {
+  } else if (isLocalAbsolutePath(urlish)) {
     url = urlish;
     host = "local";
-    repoPath = urlish.replace(/^\/+/, "").replace(/\.git$/, "");
+    repoPath = localGitCachePath(urlish);
   } else if (/^[a-z0-9]/i.test(urlish)) {
     url = `https://${urlish}`;
     const parsed = new URL(url);
@@ -202,7 +238,7 @@ function parseGitSource(spec: string): ParsedPluginSource {
     url,
     spec: ref,
     selector,
-    cachePath: `${host}/${repoPath}`,
+    cachePath: host === "local" ? repoPath : `${host}/${repoPath}`,
   };
 }
 
@@ -373,6 +409,10 @@ export function gitArtifactCacheDir(
     [...cachePath.split("/"), commit],
     "git artifact",
   );
+}
+
+export function gitScratchCloneDir(dataDir: string): string {
+  return join(dataDir, "plugins", "cache", "git", `.probe-${randomUUID()}`);
 }
 
 export async function hashInstallDir(rootDir: string): Promise<string> {

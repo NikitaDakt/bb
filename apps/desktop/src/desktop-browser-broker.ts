@@ -293,6 +293,7 @@ export function createDesktopBrowserBroker(args: {
 
   return {
     registerWindow(window: DesktopBrowserHostWindow) {
+      if (window.isDestroyed()) return;
       if (instanceForWindow(window.webContents.id)) return;
       const descriptor = {
         instanceId: randomUUID(),
@@ -317,7 +318,9 @@ export function createDesktopBrowserBroker(args: {
       for (const listener of registryListeners) listener();
     },
     listInstances(): DesktopBrowserInstance[] {
-      return [...instances.values()].map((entry) => ({ ...entry.descriptor }));
+      return [...instances.values()]
+        .filter((entry) => !entry.window.isDestroyed())
+        .map((entry) => ({ ...entry.descriptor }));
     },
     setHostId(value: string | null) {
       hostId = value;

@@ -1,0 +1,67 @@
+[
+  {
+    "file": "packages/process-utils/test/windows-process-sweep.test.ts",
+    "name": "windows sweep short paths live expands a real short name with the default canonicalizer",
+    "reason": "Requires native Windows NTFS 8.3 paths; Linux run validates injected Windows matching separately. The Windows acceptance run must execute this test."
+  },
+  {
+    "file": "packages/host-workspace/test/git-ref-mutation-lock.test.ts",
+    "name": "git ref mutation lock serializes macOS data-volume aliases of one common directory",
+    "reason": "Requires macOS data-volume aliases; not a Linux or Windows filesystem feature."
+  },
+  {
+    "file": "packages/host-watcher/test/root-recovery-benchmark.test.ts",
+    "name": "root watcher recovery benchmark measures settled recovery through real subprocess and filesystem work",
+    "reason": "Opt-in load benchmark BB_WATCHER_ROOT_RECOVERY_BENCHMARK; regular watcher recovery tests run in this regression suite."
+  },
+  {
+    "file": "apps/desktop/test/desktop-shell-path-timeout.test.ts",
+    "name": "bounds the PATH probe when interactive shell startup outlasts its timeout",
+    "reason": "macOS login-shell behavior; native Windows uses a separate PowerShell PATH probe."
+  },
+  {
+    "file": "apps/host-daemon/src/skill-script-launch.test.ts",
+    "name": "skill script launch on real Windows runs a staged .cmd through cmd.exe",
+    "reason": "Requires native Windows; required in the Windows workflow."
+  },
+  {
+    "file": "apps/host-daemon/src/skill-script-launch.test.ts",
+    "name": "skill script launch on real Windows runs a staged .ps1 through powershell.exe, including spaced args",
+    "reason": "Requires native Windows; required in the Windows workflow."
+  },
+  {
+    "file": "apps/host-daemon/src/skill-script-launch.test.ts",
+    "name": "skill script launch on real Windows runs a staged .mjs through node, including spaced args",
+    "reason": "Requires native Windows; required in the Windows workflow."
+  },
+  {
+    "file": "apps/host-daemon/src/skill-script-launch.test.ts",
+    "name": "skill script launch on real Windows runs a staged .sh through Git sh.exe",
+    "reason": "Requires Git for Windows; required in the Windows workflow."
+  },
+  {
+    "file": "apps/host-daemon/src/terminals/node-pty-fd-leak.test.ts",
+    "name": "node-pty lifecycle macOS fd cleanup releases owned pty master fds after child exit",
+    "reason": "Measures macOS-specific PTY descriptor ownership; ConPTY has its own native Windows smoke."
+  },
+  {
+    "file": "packages/plugin-build/src/toolchain.test.ts",
+    "name": "plugin build toolchain fetched toolchain builds a plugin frontend with nothing resolvable locally",
+    "reason": "Opt-in network toolchain download test BB_TEST_TOOLCHAIN_FETCH; ordinary plugin build tests run."
+  },
+  {
+    "file": "packages/provider-bridge-acp/src/bridge/agent-connection.test.ts",
+    "name": "ACP agent stdio lifecycle terminates a native Windows agent's descendants on cancellation",
+    "reason": "Exercises real taskkill against owned descendants; required in native Windows workflow."
+  },
+  {
+    "file": "apps/cli/src/__tests__/bb-cli-reexec.test.ts",
+    "name": "resolveBbCliReexecSpawnPlan reexecutes a foreign cmd shim without expanding argument metacharacters",
+    "reason": "Exercises cmd.exe argument parsing; required in native Windows workflow."
+  },
+  {
+    "file": "packages/bb-app/test/index.test.ts",
+    "name": "bb-app launcher runs the bundled CLI through bb.cmd on Windows",
+    "reason": "Runs the real Windows CLI shim; required in native Windows workflow."
+  }
+]
