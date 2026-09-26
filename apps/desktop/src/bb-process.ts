@@ -203,6 +203,48 @@ async function runAppImageBridgeSupervisor(
 
 const APPIMAGE_BRIDGE_BOOTSTRAP = `await (${runAppImageBridgeSupervisor.toString()})(${JSON.stringify(APPIMAGE_BRIDGE_RELATIVE_PATH_ENV)});`;
 
+async function runWindowsBridgeSupervisor(): Promise<void> {
+  const { spawn: spawnChild, spawnSync } =
+    process.getBuiltinModule("node:child_process");
+  const { join } = process.getBuiltinModule("node:path");
+  const bridgePath = process.argv.at(-1);
+  if (!bridgePath) throw new Error("Windows bridge path is missing");
+  if (!process.connected) return;
+
+  const bridge = spawnChild(process.execPath, [bridgePath], {
+    env: process.env,
+    stdio: "inherit",
+    windowsHide: true,
+  });
+  const stop = (): void => {
+    if (
+      bridge.pid === undefined ||
+      bridge.exitCode !== null ||
+      bridge.signalCode !== null
+    )
+      return;
+    const result = spawnSync(
+      join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe"),
+      ["/PID", String(bridge.pid), "/T", "/F"],
+      { stdio: "ignore", windowsHide: true, timeout: 10_000 },
+    );
+    if (result.status !== 0) bridge.kill("SIGKILL");
+  };
+  process.once("disconnect", stop);
+  try {
+    process.exitCode =
+      (await new Promise<number | null>((resolveExit, rejectExit) => {
+        bridge.once("error", rejectExit);
+        bridge.once("exit", resolveExit);
+      })) ?? 1;
+  } finally {
+    process.off("disconnect", stop);
+    if (process.connected) process.disconnect?.();
+  }
+}
+
+const WINDOWS_BRIDGE_BOOTSTRAP = `await (${runWindowsBridgeSupervisor.toString()})();`;
+
 function createRuntimeLogBuffer(
   args: CreateRuntimeLogBufferArgs,
 ): RuntimeLogBuffer {
@@ -361,11 +403,23 @@ export function startBbAppProcess(args: StartBbAppProcessArgs): BbAppProcess {
     env: args.env,
     runtime: args.runtime,
   });
-  const childProcess = crossSpawn(launch.executablePath, launch.args, {
+  const windowsSupervisor = args.platform === "win32";
+  const launchArgs = windowsSupervisor
+    ? [
+        "--input-type=module",
+        "--eval",
+        WINDOWS_BRIDGE_BOOTSTRAP,
+        "--",
+        args.bridgePath,
+      ]
+    : launch.args;
+  const childProcess = crossSpawn(launch.executablePath, launchArgs, {
     cwd: args.cwd,
-    detached: args.runtime.kind === "appimage",
+    detached: args.runtime.kind === "appimage" || windowsSupervisor,
     env: launch.env,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: windowsSupervisor
+      ? ["ignore", "pipe", "pipe", "ipc"]
+      : ["ignore", "pipe", "pipe"],
     windowsHide: true,
   });
   const pid = childProcess.pid;

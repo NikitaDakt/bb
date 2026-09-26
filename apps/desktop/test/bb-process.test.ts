@@ -127,6 +127,104 @@ afterEach(async () => {
 });
 
 describe("bb app process", () => {
+  it.runIf(process.platform === "win32")(
+    "preserves the Windows bridge exit code and closes its owner channel",
+    async () => {
+      const script = await createTempScript({
+        contents: "process.exitCode = 7;\n",
+      });
+      const entry = startBbAppProcess({
+        bridgePath: script.path,
+        cwd: script.root,
+        env: process.env,
+        logLineLimit: 20,
+        platform: "win32",
+        runtime: {
+          executablePath: process.execPath,
+          kind: "direct",
+          mode: "node",
+        },
+      });
+      processes.push(entry);
+      expect(await entry.exit).toEqual({ code: 7, signal: null });
+      expect(entry.childProcess.connected).toBe(false);
+    },
+  );
+
+  it.runIf(process.platform === "win32").each(["early", "running"])(
+    "reaps the Windows bridge and descendants after %s owner disconnect",
+    async (timing) => {
+      const script = await createTempScript({ contents: "" });
+      const pidFile = join(script.root, "owned-pids.json");
+      await writeFile(
+        script.path,
+        `
+        import { spawn } from "node:child_process";
+        import { writeFileSync } from "node:fs";
+        const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore", windowsHide: true });
+        writeFileSync(${JSON.stringify(pidFile)}, JSON.stringify([process.pid, child.pid]));
+        console.log("ready");
+        setInterval(() => {}, 1000);
+      `,
+      );
+      const entry = startBbAppProcess({
+        bridgePath: script.path,
+        cwd: script.root,
+        env: process.env,
+        logLineLimit: 20,
+        platform: "win32",
+        runtime: {
+          executablePath: process.execPath,
+          kind: "direct",
+          mode: "node",
+        },
+      });
+      processes.push(entry);
+      if (timing === "running")
+        await waitForLog({ process: entry, text: "ready" });
+      entry.childProcess.disconnect();
+      await entry.exit;
+      const contents = await readFile(pidFile, "utf8").catch(
+        (error: unknown) => {
+          if (
+            error instanceof Error &&
+            "code" in error &&
+            error.code === "ENOENT"
+          )
+            return "[]";
+          throw error;
+        },
+      );
+      const pids: unknown = JSON.parse(contents);
+      if (
+        !Array.isArray(pids) ||
+        !pids.every(
+          (pid: unknown) =>
+            typeof pid === "number" && Number.isInteger(pid) && pid > 0,
+        )
+      ) {
+        throw new Error("Invalid owned process IDs");
+      }
+      if (timing === "running") expect(pids).toHaveLength(2);
+      for (const pid of pids) {
+        await expect
+          .poll(
+            () => {
+              try {
+                process.kill(pid, 0);
+                return true;
+              } catch {
+                return false;
+              }
+            },
+            { timeout: 5000 },
+          )
+          .toBe(false);
+      }
+    },
+    20_000,
+  );
+
   it("uses the dev Node executable without Electron node mode", () => {
     const env = createBbAppProcessEnv({
       env: {
