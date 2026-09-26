@@ -1,5 +1,6 @@
 import { execFile, spawn, spawnSync } from "node:child_process";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { closeSync, openSync } from "node:fs";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -63,6 +64,39 @@ function isInterestingImage(imageName, appImageName) {
 async function snapshotTasklist() {
   const { stdout } = await execFileAsync("tasklist.exe", ["/FO", "CSV", "/NH"]);
   return { raw: stdout, rows: parseTasklistCsv(stdout) };
+}
+
+async function snapshotProcessDetails(smokeRoot) {
+  const powershell = join(
+    process.env.SystemRoot ?? "C:\\Windows",
+    "System32",
+    "WindowsPowerShell",
+    "v1.0",
+    "powershell.exe",
+  );
+  const { stdout } = await execFileAsync(
+    powershell,
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      String.raw`
+      [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+      Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, ExecutablePath, CreationDate,
+        @{n='FixturePath';e={$_.CommandLine -and $_.CommandLine.Contains($env:BB_PROCESS_SMOKE_ROOT)}},
+        @{n='Scripts';e={@([regex]::Matches([string]$_.CommandLine, '[^\s"]+\.(?:mjs|cjs|js)\b') | ForEach-Object Value)}},
+        @{n='VersionProbe';e={$_.CommandLine -match '(?:^|\s)--version(?:\s|$)'}} | ConvertTo-Json -Depth 4
+    `,
+    ],
+    {
+      encoding: "utf8",
+      timeout: 10_000,
+      windowsHide: true,
+      env: { ...process.env, BB_PROCESS_SMOKE_ROOT: smokeRoot },
+    },
+  );
+  return JSON.parse(stdout);
 }
 
 async function waitForImage(imageName, timeoutMs) {
@@ -140,14 +174,18 @@ async function smokeWindowsProcesses() {
   delete childEnv.ELECTRON_RUN_AS_NODE;
 
   const failures = [];
+  const outputFiles = ["desktop-stdout.log", "desktop-stderr.log"].map((name) =>
+    openSync(join(evidenceDir, name), "w"),
+  );
   const child = spawn(
     appBinary,
     createPackagedAppLaunchArguments({
       platform: process.platform,
       userDataDir,
     }),
-    { env: childEnv, stdio: "ignore" },
+    { env: childEnv, stdio: ["ignore", ...outputFiles] },
   );
+  outputFiles.forEach(closeSync);
   try {
     if (child.pid === undefined) {
       failures.push("Packaged app did not expose a PID.");
@@ -165,6 +203,15 @@ async function smokeWindowsProcesses() {
             `Packaged app exited during settle: code=${String(child.exitCode)} signal=${String(child.signalCode)}.`,
           );
         } else {
+          await writeFile(
+            join(evidenceDir, "processes-before-crash.json"),
+            JSON.stringify(await snapshotProcessDetails(smokeRoot), null, 2),
+          );
+          const runtime = await readFile(
+            join(userDataDir, "owned-runtime.json"),
+            "utf8",
+          ).catch(() => "null");
+          await writeFile(join(evidenceDir, "owned-runtime.json"), runtime);
           spawnSync("taskkill.exe", ["/PID", String(child.pid), "/F"], {
             stdio: "ignore",
           });
@@ -206,6 +253,10 @@ async function smokeWindowsProcesses() {
     await sleep(pollIntervalMs);
   } while (Date.now() - cleanupStarted < exitTimeoutMs);
   await writeFile(join(evidenceDir, "tasklist-after.csv"), after.raw, "utf8");
+  await writeFile(
+    join(evidenceDir, "processes-after-crash.json"),
+    JSON.stringify(await snapshotProcessDetails(smokeRoot), null, 2),
+  );
   if (leaked.length > 0) {
     failures.push(
       `Leaked processes after app shutdown: ${leaked
