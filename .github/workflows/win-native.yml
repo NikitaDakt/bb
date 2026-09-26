@@ -211,6 +211,10 @@ jobs:
           if ($baseline.Count -ne 1) { throw 'Expected one synthetic baseline installer' }
           node apps/desktop/scripts/smoke-windows-upgrade.mjs --baseline-installer $baseline[0].FullName --baseline-version $baselineVersion --candidate-installer $candidate[0].FullName --candidate-version $candidateVersion --evidence-dir .rt/windows-native/upgrade
           if ($LASTEXITCODE) { throw 'Installed version upgrade failed' }
+      - name: Crash during provider probes
+        if: ${{ !cancelled() && steps.installer.outcome == 'success' }}
+        timeout-minutes: 5
+        run: node apps/desktop/scripts/smoke-windows-processes.mjs --slow-npm-probes --evidence-dir .rt/windows-native/slow-npm-crash
       - name: Upload test evidence
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4

@@ -1,6 +1,6 @@
 import { execFile, spawn, spawnSync } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -99,6 +99,25 @@ async function snapshotProcessDetails(smokeRoot) {
   return JSON.parse(stdout);
 }
 
+async function configureSlowNpmProbes(smokeRoot, env) {
+  const bin = join(smokeRoot, "slow npm probes");
+  await mkdir(bin);
+  await writeFile(
+    join(bin, "npm.cmd"),
+    `@"${process.execPath}" "%~dp0npm-probe.mjs" %*\r\n`,
+  );
+  await writeFile(
+    join(bin, "npm-probe.mjs"),
+    `import { writeFileSync } from "node:fs";
+     import { join } from "node:path";
+     writeFileSync(join(${JSON.stringify(bin)}, process.pid + ".pid"), String(process.pid));
+     setInterval(() => {}, 1000);`,
+  );
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path");
+  env[pathKey ?? "PATH"] = `${bin};${pathKey ? env[pathKey] : ""}`;
+  return bin;
+}
+
 async function waitForImage(imageName, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   const lower = imageName.toLowerCase();
@@ -172,6 +191,10 @@ async function smokeWindowsProcesses() {
   delete childEnv.BB_DESKTOP_APP_URL;
   delete childEnv.BB_DESKTOP_NODE_EXEC_PATH;
   delete childEnv.ELECTRON_RUN_AS_NODE;
+  const probeDir = process.argv.includes("--slow-npm-probes")
+    ? await configureSlowNpmProbes(smokeRoot, childEnv)
+    : null;
+  let probePids = [];
 
   const failures = [];
   const outputFiles = ["desktop-stdout.log", "desktop-stderr.log"].map((name) =>
@@ -203,10 +226,27 @@ async function smokeWindowsProcesses() {
             `Packaged app exited during settle: code=${String(child.exitCode)} signal=${String(child.signalCode)}.`,
           );
         } else {
+          const processDetails = await snapshotProcessDetails(smokeRoot);
           await writeFile(
             join(evidenceDir, "processes-before-crash.json"),
-            JSON.stringify(await snapshotProcessDetails(smokeRoot), null, 2),
+            JSON.stringify(processDetails, null, 2),
           );
+          if (probeDir !== null) {
+            probePids = (await readdir(probeDir))
+              .filter((name) => /^\d+\.pid$/u.test(name))
+              .map((name) => Number(name.slice(0, -4)));
+            const liveProbes = processDetails.filter((entry) =>
+              probePids.includes(entry.ProcessId),
+            );
+            await writeFile(
+              join(evidenceDir, "slow-npm-probes.json"),
+              JSON.stringify(liveProbes, null, 2),
+            );
+            if (liveProbes.length === 0)
+              failures.push(
+                "No slow npm child was running before the desktop crash.",
+              );
+          }
           const runtime = await readFile(
             join(userDataDir, "owned-runtime.json"),
             "utf8",
@@ -263,6 +303,13 @@ async function smokeWindowsProcesses() {
         .map((row) => `${row.image}(${String(row.pid)})`)
         .join(", ")}.`,
     );
+  }
+  for (const pid of probePids) {
+    if (leaked.some((entry) => entry.pid === pid)) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {}
+    }
   }
   console.log(
     `Process hygiene smoke: ${String(after.rows.length)} processes after shutdown, ${String(leaked.length)} new interesting processes after ${String(Date.now() - cleanupStarted)}ms.`,
