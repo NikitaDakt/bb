@@ -40,6 +40,8 @@ await mkdir(projectPath);
 const binary = join(installDir, "wbb.exe");
 const evidence = { root, checks: [], versions: [] };
 const execFileAsync = promisify(execFile);
+const electron =
+  "process.getBuiltinModule('module').createRequire(process.execPath)('electron')";
 
 async function waitFor(label, predicate, timeoutMs = 60_000) {
   const deadline = Date.now() + timeoutMs;
@@ -182,7 +184,7 @@ async function launch(version) {
     const match = outputTail.match(
       /Debugger listening on (ws:\/\/127\.0\.0\.1:\d+\/[^\s]+)/u,
     );
-    if (match) endpoint = match[1];
+    if (match && !endpoint) endpoint = match[1];
   };
   child.stdout.on("data", capture);
   child.stderr.on("data", capture);
@@ -190,7 +192,7 @@ async function launch(version) {
     try {
       if (inspector && child.exitCode === null && child.signalCode === null) {
         await inspector.evaluate(
-          "setImmediate(() => require('electron').app.quit()); true",
+          `(() => { const app = ${electron}.app; setImmediate(() => app.quit()); return true; })()`,
         );
       }
       inspector?.close();
@@ -221,7 +223,7 @@ async function launch(version) {
     );
     assert.equal(await inspector.evaluate("process.pid"), child.pid);
     assert.equal(
-      await inspector.evaluate("require('electron').app.getVersion()"),
+      await inspector.evaluate(`${electron}.app.getVersion()`),
       version,
     );
     const status = await waitFor("native host daemon", async () => {
@@ -240,7 +242,7 @@ async function launch(version) {
     assert.equal(runtime.serverUrl, serverUrl);
     const desktopInfo = await waitFor("compiled Desktop version", () =>
       inspector.evaluate(`
-      Promise.all(require('electron').BrowserWindow.getAllWindows().map(window =>
+      Promise.all(${electron}.BrowserWindow.getAllWindows().map(window =>
         window.webContents.executeJavaScript('typeof window.bbDesktop === "object" ? window.bbDesktop.getInfo() : null').catch(() => null)
       )).then(results => results.find(info => info && info.version))
     `),

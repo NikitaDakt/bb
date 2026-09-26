@@ -1,9 +1,10 @@
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { buildPluginApp } from "./build-plugin-app.js";
 import {
   PLUGIN_TOOLCHAIN_PINS,
   resolvePluginBuildToolchain,
@@ -102,11 +103,23 @@ describe("plugin build toolchain", () => {
             `export default definePluginApp({});\n`,
         );
 
-        const result = await buildPluginApp(pluginDir, "0.9.0-test", toolchain);
-        const css = await readFile(result.cssPath, "utf8");
-
-        expect(css.length).toBeGreaterThan(0);
-        expect(css).toContain("--");
+        await promisify(execFile)(
+          process.execPath,
+          [
+            "--import",
+            "tsx",
+            "--input-type=module",
+            "--eval",
+            `import assert from "node:assert/strict";
+             import { readFile } from "node:fs/promises";
+             import { buildPluginApp } from ${JSON.stringify(new URL("./build-plugin-app.ts", import.meta.url).href)};
+             const result = await buildPluginApp(${JSON.stringify(pluginDir)}, "0.9.0-test", ${JSON.stringify(toolchain)});
+             const css = await readFile(result.cssPath, "utf8");
+             assert.ok(css.length > 0);
+             assert.ok(css.includes("--"));`,
+          ],
+          { timeout: 60_000 },
+        );
       },
       600_000,
     );
@@ -152,11 +165,14 @@ describe("plugin build toolchain", () => {
           .filter((line) => line.includes("="))
           .map((line) => {
             const at = line.indexOf("=");
-            return [line.slice(0, at), line.slice(at + 1)] as const;
+            return [
+              line.slice(0, at).toLowerCase(),
+              line.slice(at + 1),
+            ] as const;
           }),
       );
       expect(seen.has("npm_config_allow_scripts")).toBe(false);
-      expect(seen.has("NPM_CONFIG_IGNORE_SCRIPTS")).toBe(false);
+      expect(seen.has("npm_config_ignore_scripts")).toBe(false);
       expect(seen.get("npm_config_registry")).toBe(
         "https://registry.example.invalid/",
       );
