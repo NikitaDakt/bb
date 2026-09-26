@@ -283,7 +283,9 @@ describe("worktree host entry", () => {
     );
     if (result.status !== "created") throw new Error(result.message);
     if (process.platform === "win32") {
-      expect(result.path.length).toBeLessThan(260);
+      expect(
+        Buffer.byteLength(join(result.path, ".git"), "utf8"),
+      ).toBeLessThanOrEqual(220);
       expect(
         Buffer.byteLength(basename(result.path), "utf8"),
       ).toBeLessThanOrEqual(200);

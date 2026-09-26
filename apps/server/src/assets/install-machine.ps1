@@ -367,7 +367,6 @@ function Install-ScheduledTaskPersistence {
     [string]$Port,
     [string]$ServerUrl
   )
-  $escapedDataDir = [Security.SecurityElement]::Escape($DataDir)
   $escapedServer = [Security.SecurityElement]::Escape($ServerUrl)
   $systemCmd = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
   $taskLog = Join-Path $DataDir 'logs\host-daemon.log'
@@ -409,7 +408,6 @@ function Install-ScheduledTaskPersistence {
     <Exec>
       <Command>$escapedSystemCmd</Command>
       <Arguments>$escapedTaskCommand</Arguments>
-      <WorkingDirectory>$escapedDataDir</WorkingDirectory>
     </Exec>
   </Actions>
 </Task>
@@ -838,6 +836,7 @@ $wrapperLines = @(
   '$ErrorActionPreference = ''Stop'''
   '$env:BB_APP_NPM_PREFIX=' + (Quote-PowerShell $bbAppNpmPrefix)
   '$env:BB_DATA_DIR=' + (Quote-PowerShell $dataDir)
+  'Set-Location -LiteralPath $env:BB_DATA_DIR'
   '$env:PATH=' + (Quote-PowerShell $expandedPath)
   'Remove-Item Env:BB_CLI -ErrorAction SilentlyContinue'
   'Remove-Item Env:BB_ENROLLMENT -ErrorAction SilentlyContinue'

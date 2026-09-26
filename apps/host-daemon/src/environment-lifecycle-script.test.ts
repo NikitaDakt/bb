@@ -89,11 +89,10 @@ describe("core environment scripts", () => {
       timeoutMs: 5000,
       onProgress: (entry) => output.push(entry.text),
     });
-    expect((await readFile(join(workspacePath, "marker"), "utf8")).trim()).toBe(
-      process.platform === "win32"
-        ? (await realpath(workspacePath)).replaceAll("\\", "/")
-        : await realpath(workspacePath),
-    );
+    const recordedPath = (
+      await readFile(join(workspacePath, "marker"), "utf8")
+    ).trim();
+    expect(await realpath(recordedPath)).toBe(await realpath(workspacePath));
     expect(output).toContain("second");
     expect(output).toContain("stderr");
     expect(output).toContain("Running .bb-env-setup.sh");

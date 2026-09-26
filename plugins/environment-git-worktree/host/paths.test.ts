@@ -93,26 +93,31 @@ describe("managed worktree paths", () => {
     );
   });
 
-  it("bounds the complete Windows Git working directory and keeps names distinct", () => {
-    const args = {
-      dataDir: `C:\\${"parent\\".repeat(20)}`,
-      pathKey: "thread",
-      sourcePath: `C:\\src\\${"repository".repeat(20)}`,
-      platform: "win32" as const,
-    };
-    const target = resolveWorktreeTargetPath(args);
-    expect(target.length).toBeLessThan(260);
-    expect(win32.basename(target)).toMatch(/-[a-f0-9]{16}$/u);
-    expect(win32.dirname(target)).toBe(
-      win32.join(args.dataDir, "worktrees", "thread"),
-    );
-    expect(
-      resolveWorktreeTargetPath({
-        ...args,
-        sourcePath: `${args.sourcePath}-other`,
-      }),
-    ).not.toBe(target);
-  });
+  it.each([`C:\\${"parent\\".repeat(20)}`, `C:\\${"проект\\".repeat(11)}`])(
+    "bounds Windows Git's UTF-8 directory path under %s and keeps names distinct",
+    (dataDir) => {
+      const args = {
+        dataDir,
+        pathKey: "thread",
+        sourcePath: `C:\\src\\${"repository".repeat(20)}`,
+        platform: "win32" as const,
+      };
+      const target = resolveWorktreeTargetPath(args);
+      expect(
+        Buffer.byteLength(win32.join(target, ".git"), "utf8"),
+      ).toBeLessThanOrEqual(220);
+      expect(win32.basename(target)).toMatch(/-[a-f0-9]{16}$/u);
+      expect(win32.dirname(target)).toBe(
+        win32.join(args.dataDir, "worktrees", "thread"),
+      );
+      expect(
+        resolveWorktreeTargetPath({
+          ...args,
+          sourcePath: `${args.sourcePath}-other`,
+        }),
+      ).not.toBe(target);
+    },
+  );
 
   it("rejects a Windows data directory without room for a managed worktree", () => {
     const args = {

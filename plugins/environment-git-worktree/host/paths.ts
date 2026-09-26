@@ -7,6 +7,7 @@ const WINDOWS_RESERVED_NAME_PATTERN =
   /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/iu;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/u;
 const MAX_REPO_DIR_NAME_BYTES = 200;
+const MAX_WINDOWS_GIT_DIR_BYTES = 260 - 40;
 const REPO_DIR_HASH_LENGTH = 16;
 
 function invalidSourcePath(sourcePath: string): WorkspaceError {
@@ -118,7 +119,12 @@ export function resolveWorktreeTargetPath(args: {
     pathApi === path.win32
       ? Math.min(
           MAX_REPO_DIR_NAME_BYTES,
-          259 - pathApi.resolve(root).length - 1,
+          MAX_WINDOWS_GIT_DIR_BYTES -
+            Buffer.byteLength(
+              pathApi.join(pathApi.resolve(root), ".git"),
+              "utf8",
+            ) -
+            1,
         )
       : MAX_REPO_DIR_NAME_BYTES;
   if (maxBytes < REPO_DIR_HASH_LENGTH + 2) {

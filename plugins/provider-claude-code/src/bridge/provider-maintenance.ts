@@ -30,7 +30,10 @@ const USAGE_FETCH_TIMEOUT_MS = 15_000;
 const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 const CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials";
 const CLAUDE_NPM_PACKAGE = "@anthropic-ai/claude-code";
-const CLAUDE_INSTALL_SCRIPT_URL = "https://claude.ai/install.sh";
+const CLAUDE_INSTALL_SCRIPT_URL =
+  process.platform === "win32"
+    ? "https://claude.ai/install.ps1"
+    : "https://claude.ai/install.sh";
 
 const claudeCredentialsSchema = z.object({
   claudeAiOauth: z.object({

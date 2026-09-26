@@ -351,8 +351,8 @@ export function downloadedInstallerCommand(
   if (platform === "win32") {
     const script = [
       "$ErrorActionPreference = 'Stop'",
-      "$tmp = Join-Path $env:TEMP ('provider-installation-' + [Guid]::NewGuid().ToString('N') + '.sh')",
-      `try { Invoke-WebRequest -Uri ${quotePowerShellSingleQuoted(url)} -OutFile $tmp; $bash = Get-Command bash -ErrorAction SilentlyContinue; if (-not $bash) { throw 'bash not found: install Git for Windows or run the provider installer manually' }; & $bash.Source $tmp } finally { Remove-Item $tmp -ErrorAction SilentlyContinue }`,
+      "$tmp = Join-Path $env:TEMP ('provider-installation-' + [Guid]::NewGuid().ToString('N') + '.ps1')",
+      `try { Invoke-WebRequest -UseBasicParsing -Uri ${quotePowerShellSingleQuoted(url)} -OutFile $tmp; & $tmp; if ($LASTEXITCODE) { exit $LASTEXITCODE } } finally { Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue }`,
     ].join("; ");
     const command = "powershell.exe";
     const args = [

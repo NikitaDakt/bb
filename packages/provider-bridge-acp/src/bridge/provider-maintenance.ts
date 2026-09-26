@@ -418,8 +418,13 @@ export async function getAcpProviderUsage(args: {
 
 export const CURSOR_ACP_MAINTENANCE: AcpMaintenanceDialect = {
   loginCommand: "cursor-agent login",
-  installer: (platform) =>
-    downloadedInstallerCommand(CURSOR_INSTALL_SCRIPT_URL, platform),
+  installer: (platform = process.platform) =>
+    downloadedInstallerCommand(
+      platform === "win32"
+        ? `${CURSOR_INSTALL_SCRIPT_URL}?win32=true`
+        : CURSOR_INSTALL_SCRIPT_URL,
+      platform,
+    ),
   readAccount: async () => {
     const accessToken = await readAccessToken();
     return accessToken === null ? null : { email: readAccountEmail() };

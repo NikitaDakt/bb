@@ -3,7 +3,7 @@ import type { ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildWindowsTaskkillRequest,
   clearSweepRootProcesses,
@@ -15,6 +15,7 @@ import {
   matchWindowsProcessesUnderDirectory,
   parseWindowsProcessSnapshot,
   registerSweepRootProcess,
+  spawnPortablePipedProcess,
   spawnPortableProcess,
   stopProcessGroupLeaderFirst,
   unregisterSweepRootProcess,
@@ -899,6 +900,57 @@ describe("spawnPortableProcess sweep tracking", () => {
     }
     cleanupDirs.length = 0;
   });
+
+  it.runIf(process.platform === "win32").each(["sync", "async"])(
+    "enumerates and stops an owned process tree with an empty PATH (%s)",
+    async (mode) => {
+      const dir = mkdtempSync(join(tmpdir(), "bb-empty-path-tree-"));
+      cleanupDirs.push(dir);
+      const child = spawnPortablePipedProcess({
+        command: process.execPath,
+        args: [
+          "-e",
+          'const child = require("node:child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {stdio: "ignore"}); child.once("spawn", () => console.log(child.pid)); setInterval(() => {}, 1000);',
+        ],
+        cwd: dir,
+      });
+      const closed = once(child, "close");
+      let descendantPid: number | undefined;
+      try {
+        const [output] = await once(child.stdout, "data");
+        descendantPid = Number(String(output).trim());
+        expect(Number.isSafeInteger(descendantPid)).toBe(true);
+        expect(descendantPid).toBeGreaterThan(0);
+        vi.stubEnv("PATH", "");
+        vi.stubEnv("Path", "");
+        const found = await listProcessesWithCwdUnder({ directory: dir });
+        expect(found.map((entry) => entry.pid)).toEqual(
+          expect.arrayContaining([child.pid, descendantPid]),
+        );
+        if (mode === "sync") killProcessGroup({ child, signal: "SIGKILL" });
+        else
+          await stopProcessGroupLeaderFirst({
+            child,
+            timeoutMs: 5000,
+            killGraceMs: 0,
+          });
+        await closed;
+        expect(() => process.kill(descendantPid!, 0)).toThrow();
+        expect(() => process.kill(child.pid!, 0)).toThrow();
+      } finally {
+        vi.unstubAllEnvs();
+        if (child.exitCode === null && child.signalCode === null)
+          killProcessGroup({ child, signal: "SIGKILL" });
+        if (descendantPid !== undefined) {
+          try {
+            process.kill(descendantPid, "SIGKILL");
+          } catch {}
+        }
+        await closed;
+      }
+    },
+    30_000,
+  );
 
   it("registers the spawn cwd so a later Windows sweep finds the child", async () => {
     const dir = mkdtempSync(join(tmpdir(), "bb-win-track-"));

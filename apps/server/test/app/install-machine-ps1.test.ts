@@ -364,7 +364,7 @@ describe.runIf(process.platform === "win32")(
       expect(
         readFileSync(join(fixture.dataDir, "host-daemon-port"), "utf8"),
       ).toBe(port);
-    });
+    }, 30_000);
 
     it("adopts an existing machine without replacing its identity or enrolling again", () => {
       const fixture = createFixture();
@@ -469,6 +469,10 @@ describe.runIf(process.platform === "win32")(
           const first = runInstaller(fixture, serviceEnv);
           expect(first.status, first.stdout + first.stderr).toBe(0);
           const canonicalDir = realpathSync.native(fixture.dataDir);
+          const daemon = JSON.parse(
+            readFileSync(join(fixture.dataDir, "daemon-start.json"), "utf8"),
+          );
+          expect(daemon.cwd).toBe(canonicalDir);
           const wrapper = join(canonicalDir, `${taskName}.ps1`);
           const state = registration();
           expect(state.task).toBe(kind === "task");
