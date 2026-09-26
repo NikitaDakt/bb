@@ -319,7 +319,9 @@ describe.runIf(process.platform === "win32")(
         "x-private-access: private-token",
       );
       const npmArgs = JSON.parse(readFileSync(fixture.npmLog, "utf8").trim());
-      expect(npmArgs).toContain(join(fixture.dataDir, "npm"));
+      expect(npmArgs).toContain(
+        join(realpathSync.native(fixture.dataDir), "npm"),
+      );
       expect(npmArgs).toContain(
         "--allow-scripts=better-sqlite3,node-pty,@parcel/watcher",
       );

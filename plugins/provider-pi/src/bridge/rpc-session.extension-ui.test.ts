@@ -8,8 +8,10 @@ import { PiRpcSession } from "./rpc-session.js";
 it("auto-cancels extension dialogs in a helper session without a UI handler", async () => {
   const dir = mkdtempSync(join(tmpdir(), "bb-pi-helper-ui-"));
   const log = join(dir, "responses.jsonl");
+  const pidFile = join(dir, "child.pid");
   const script = `
     const fs = require("node:fs");
+    fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
     const input = require("node:readline").createInterface({ input: process.stdin });
     const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
     input.on("line", (line) => {
@@ -24,7 +26,7 @@ it("auto-cancels extension dialogs in a helper session without a UI handler", as
         fs.writeSync(3, JSON.stringify({ kind: "ready" }) + "\\n");
       }
     });
-    input.on("close", () => process.exit(0));
+    input.on("close", () => setTimeout(() => process.exit(0), 250));
     send({ type: "extension_ui_request", id: "ui-helper", method: "confirm", title: "Startup confirmation", message: "Continue?" });
   `;
   vi.stubEnv(PI_BRIDGE_COMMAND_ENV, process.execPath);
@@ -54,6 +56,8 @@ it("auto-cancels extension dialogs in a helper session without a UI handler", as
   } finally {
     try {
       await session.closeGracefully(1000);
+      const pid = Number(readFileSync(pidFile, "utf8"));
+      expect(() => process.kill(pid, 0)).toThrow();
     } finally {
       vi.unstubAllEnvs();
       rmSync(dir, { recursive: true, force: true });

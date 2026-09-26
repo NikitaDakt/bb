@@ -25,6 +25,7 @@ import {
   createScriptedEchoRequestRecord,
   createScriptedEchoRuntime,
   fullRuntimeOptions,
+  isPidAlive,
   scriptedEchoProcessEnv,
   wait,
   waitForLoggedSpawnPidExit,
@@ -229,7 +230,7 @@ describe("createAgentRuntime process lifecycle", () => {
       providerId: "fake",
     });
 
-    expect(staleProcess.child.killed).toBe(true);
+    expect(isPidAlive(staleProcess.child.pid!)).toBe(false);
     expect(() =>
       manager.requireProviderProcess({
         processKey: staleKey,
@@ -346,7 +347,7 @@ describe("createAgentRuntime process lifecycle", () => {
       undefined,
     ]);
     expect(completedPromptly).toBe(true);
-    expect(replacementProcess.child.killed).toBe(true);
+    expect(isPidAlive(replacementProcess.child.pid!)).toBe(false);
     await manager.ensureProvider(MANAGER_PROVIDER);
     expect(manager.listRunningProviders()).toEqual([]);
   });

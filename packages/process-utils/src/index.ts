@@ -13,6 +13,7 @@ import {
   relative,
   resolve,
   sep,
+  toNamespacedPath,
 } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import crossSpawn from "cross-spawn";
@@ -163,7 +164,12 @@ export function spawnPortableProcess(
 ): PortableChildProcess {
   const platform = request.platform ?? process.platform;
   const child = crossSpawn(request.command, request.args, {
-    cwd: request.cwd,
+    cwd:
+      platform === "win32" &&
+      request.cwd !== undefined &&
+      request.cwd.length >= 260
+        ? toNamespacedPath(request.cwd)
+        : request.cwd,
     detached: request.detached,
     env: request.env,
     stdio: request.stdio,

@@ -815,19 +815,19 @@ async function constructPiThreadSession(
     if (sessions.get(threadId) === threadSession) {
       sessions.delete(threadId);
     }
-    session.kill();
+    await session.kill();
     throw error;
   }
 }
 
-function retireReplacedPiChild(replaced: ThreadSession): void {
+async function retireReplacedPiChild(replaced: ThreadSession): Promise<void> {
   replaced.closing = true;
   resolvePendingToolCalls(
     replaced,
     "Pi thread session replaced while tool call was pending",
   );
   extensionUi.cancelPendingForScope(replaced);
-  void replaced.session
+  await replaced.session
     .closeGracefully(THREAD_STOP_CLOSE_TIMEOUT_MS)
     .catch(() => undefined);
 }
@@ -850,7 +850,7 @@ async function rebuildThreadSession(
     }
     throw error;
   }
-  retireReplacedPiChild(previous);
+  await retireReplacedPiChild(previous);
   return replacement;
 }
 

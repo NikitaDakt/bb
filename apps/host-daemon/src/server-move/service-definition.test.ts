@@ -45,7 +45,7 @@ Wants=network-online.target
 [Service]
 ExecStart="/opt/node 22/bin/node" "/home/me/.bb-machines/npm/bin/bb-app" host-daemon --auto-update --host-daemon-port "38887" --server-url "${args.serverUrl}"
 Environment="BB_APP_NPM_PREFIX=/home/me/.bb-machines/npm"
-Environment="BB_DATA_DIR=${args.dataDir}"
+Environment="BB_DATA_DIR=${args.dataDir.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"
 Restart=always
 RestartSec=2
 

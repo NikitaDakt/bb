@@ -141,7 +141,10 @@ export function runGit(
 
     const child = spawnPortableOutputProcess({
       command: "git",
-      args,
+      args:
+        process.platform === "win32"
+          ? ["-c", "core.longpaths=true", ...args]
+          : args,
       cwd: options.cwd,
       env: resolveGitProcessEnv(options),
     });

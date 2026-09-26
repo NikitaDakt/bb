@@ -364,6 +364,7 @@ describe("codex process topology", () => {
       }
 
       await vi.advanceTimersByTimeAsync(201);
+      vi.useRealTimers();
       const outcome = await startOutcome;
       if (outcome.status === "resolved") {
         throw new Error(

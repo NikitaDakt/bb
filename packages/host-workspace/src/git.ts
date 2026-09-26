@@ -19,6 +19,8 @@ import {
 import { runPortableCommand } from "./portable-command.js";
 
 const DEFAULT_BUFFER_BYTES = 16 * 1024 * 1024;
+const GIT_PLATFORM_ARGS =
+  process.platform === "win32" ? ["-c", "core.longpaths=true"] : [];
 
 export class WorkspaceError extends Error {
   readonly code: string;
@@ -101,13 +103,13 @@ export async function runGitOutputPipeline(
   });
   const producer = spawnPortablePipedProcess({
     command: "git",
-    args: producerArgs,
+    args: [...GIT_PLATFORM_ARGS, ...producerArgs],
     cwd: options.cwd,
     env,
   });
   const consumer = spawnPortablePipedProcess({
     command: "git",
-    args: consumerArgs,
+    args: [...GIT_PLATFORM_ARGS, ...consumerArgs],
     cwd: options.cwd,
     env,
   });
@@ -379,7 +381,7 @@ export async function runGit(
   try {
     const result = await runPortableCommand({
       command: "git",
-      args,
+      args: [...GIT_PLATFORM_ARGS, ...args],
       cwd: options.cwd,
       env: resolveGitProcessEnv({
         env: options.env,
@@ -454,7 +456,7 @@ export async function runGitWithNullRecordLimit(
   return new Promise((resolve, reject) => {
     const child = spawnPortableOutputProcess({
       command: "git",
-      args,
+      args: [...GIT_PLATFORM_ARGS, ...args],
       cwd: options.cwd,
       env: resolveGitProcessEnv({
         env: options.env,
@@ -1304,7 +1306,7 @@ async function fetchRemoteBranchesNonInteractively(
   return new Promise((resolve) => {
     const child = spawnPortableProcess({
       command: "git",
-      args: ["fetch", "--all", "--prune", "--quiet"],
+      args: [...GIT_PLATFORM_ARGS, "fetch", "--all", "--prune", "--quiet"],
       cwd,
       detached: supportsProcessGroups(),
       stdio: "ignore",
@@ -1491,7 +1493,7 @@ export async function readGitBlob(
   try {
     const result = await runPortableCommand({
       command: "git",
-      args: ["cat-file", "blob", target],
+      args: [...GIT_PLATFORM_ARGS, "cat-file", "blob", target],
       cwd,
       env: resolveGitProcessEnv({
         env: undefined,

@@ -1,4 +1,3 @@
-import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import {
   mkdir,
@@ -11,13 +10,12 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { promisify } from "node:util";
+import { runGit } from "bb-environment-provider-host/git";
 import { experimental_createHostEntryHarness } from "@get-bb/plugin-sdk/testing/host";
 import { experimental_spawnPortableProcess } from "@get-bb/plugin-sdk/provider-bridge";
 import { afterEach, describe, expect, it } from "vitest";
 import { createWorktreeHostEntry } from "./host.js";
 
-const execFileAsync = promisify(execFile);
 const temporaryRoots: string[] = [];
 
 function isPidAlive(pid: number): boolean {
@@ -30,7 +28,7 @@ function isPidAlive(pid: number): boolean {
 }
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
-  const result = await execFileAsync("git", args, {
+  const result = await runGit(args, {
     cwd,
     env: {
       ...process.env,

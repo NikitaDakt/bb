@@ -103,9 +103,16 @@ async function initSshRemoteRepo(): Promise<SshRemoteRepo> {
     ["remote", "add", "origin", "ssh://git.invalid/repo.git"],
     { cwd: repoPath },
   );
-  await runGitCommand(["config", "core.sshCommand", sshScriptPath], {
-    cwd: repoPath,
-  });
+  await runGitCommand(
+    [
+      "config",
+      "core.sshCommand",
+      JSON.stringify(sshScriptPath.split(path.sep).join("/")),
+    ],
+    {
+      cwd: repoPath,
+    },
+  );
   return { repoPath, sshLogPath };
 }
 

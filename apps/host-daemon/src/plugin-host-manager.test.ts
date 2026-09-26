@@ -278,12 +278,17 @@ describe("PluginHostManager", () => {
           },
         }),
       );
-      expect(result.output).toMatchObject({ killed: [owned.pid] });
+      expect(result.output).toMatchObject({
+        killed: expect.arrayContaining([owned.pid]),
+      });
       expect(Reflect.get(Object(result.output), "workerPid")).not.toBe(
         process.pid,
       );
       await ownedClosed;
       if (foreign !== undefined) {
+        expect(Reflect.get(Object(result.output), "killed")).not.toContain(
+          foreign.pid,
+        );
         expect(foreign.exitCode).toBeNull();
         expect(foreign.signalCode).toBeNull();
         expect(() => process.kill(foreign.pid!, 0)).not.toThrow();

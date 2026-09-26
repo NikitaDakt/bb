@@ -77,9 +77,13 @@ describe("Claude Code provider maintenance", () => {
       },
       verification: { kind: "installed" },
     });
-    expect(run.available && run.command.args).toHaveLength(2);
-    expect(run.available && run.command.args[1]).toContain(
-      "https://claude.ai/install.sh",
+    expect(run.available && run.command.args).toHaveLength(
+      process.platform === "win32" ? 6 : 2,
+    );
+    expect(run.available && run.command.args.at(-1)).toContain(
+      process.platform === "win32"
+        ? "https://claude.ai/install.ps1"
+        : "https://claude.ai/install.sh",
     );
   });
 });

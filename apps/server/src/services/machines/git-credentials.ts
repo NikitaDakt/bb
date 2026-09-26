@@ -1,9 +1,6 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { experimental_runPortableCommandCapture as runPortableCommandCapture } from "@get-bb/plugin-sdk/provider-bridge";
 import type { HostDaemonContributedEnvEntry } from "@bb/host-daemon-contract";
 import { z } from "zod";
-
-const exec = promisify(execFile);
 
 const githubCredentialHelper =
   '!f() { test "$1" = get || exit 0; protocol=; host=; while IFS= read -r line && test -n "$line"; do case "$line" in protocol=*) protocol=${line#protocol=} ;; host=*) host=${line#host=} ;; esac; done; if test "$protocol" = https && test "$host" = github.com && test -n "$GH_TOKEN"; then printf "username=x-access-token\\npassword=%s\\n" "$GH_TOKEN"; fi; }; f';
@@ -21,9 +18,10 @@ const identitySchema = z.object({
 });
 
 async function runGh(args: string[]): Promise<string> {
-  const { stdout } = await exec("gh", args, {
-    timeout: 15_000,
-    maxBuffer: 1024 * 1024,
+  const { stdout } = await runPortableCommandCapture({
+    command: "gh",
+    args,
+    timeoutMs: 15_000,
   });
   return stdout;
 }
