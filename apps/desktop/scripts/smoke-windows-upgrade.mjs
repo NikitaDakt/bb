@@ -230,7 +230,7 @@ async function launch(version) {
       const status = await json(`http://127.0.0.1:${daemonPort}/status`);
       return status.connected && status.serverUrl === serverUrl && status;
     });
-    assert.equal(status.platform, "windows");
+    assert.equal(status.platform, "win32");
     assert.ok(status.hostId);
     await waitFor("server and plugins", () =>
       json(`${serverUrl}/api/v1/system/providers`),
