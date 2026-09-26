@@ -14,7 +14,7 @@ interface CliResult {
   stdout: string;
 }
 
-describe.skipIf(process.platform === "win32")("bb entrypoint errors", () => {
+describe("bb entrypoint errors", () => {
   let server: Server;
   let serverUrl: string;
   let dataDir: string;

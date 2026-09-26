@@ -1,4 +1,5 @@
 import { StringDecoder } from "node:string_decoder";
+import { spawnSync } from "node:child_process";
 import {
   DEFAULT_ENV_SETUP_SCRIPT_NAME,
   DEFAULT_ENV_TEARDOWN_SCRIPT_NAME,
@@ -53,6 +54,50 @@ interface BuildLifecycleScriptCommandArgs {
 interface RunLifecycleScriptArgs extends RunSetupScriptArgs {
   kind: "setup" | "teardown";
   scriptName: string;
+}
+
+export function gitBashProcessGroupId(
+  processList: string,
+  windowsPid: number,
+): number | null {
+  for (const line of processList.split(/\r?\n/u)) {
+    const match = line.match(/^\s*(?:[SIO]\s+)?(\d+)\s+\d+\s+(\d+)\s+(\d+)\s/u);
+    if (match === null) continue;
+    const pid = Number(match[1]);
+    const pgid = Number(match[2]);
+    if (
+      Number(match[3]) === windowsPid &&
+      Number.isSafeInteger(pid) &&
+      pid > 1 &&
+      pid === pgid
+    ) {
+      return pgid;
+    }
+  }
+  return null;
+}
+
+function killGitBashProcessGroup(
+  bashPath: string,
+  windowsPid: number,
+): boolean {
+  const options = {
+    encoding: "utf8",
+    timeout: 5000,
+    windowsHide: true,
+  } as const;
+  const binDir = path.dirname(bashPath);
+  const processes = spawnSync(path.join(binDir, "ps.exe"), ["-l"], options);
+  if (processes.status !== 0) return false;
+  const pgid = gitBashProcessGroupId(processes.stdout, windowsPid);
+  return (
+    pgid !== null &&
+    spawnSync(
+      path.join(binDir, "kill.exe"),
+      ["-KILL", "--", `-${pgid}`],
+      options,
+    ).status === 0
+  );
 }
 
 export function buildLifecycleScriptCommand(
@@ -144,7 +189,11 @@ async function runLifecycleScript(
         "bin",
         "bash.exe",
       );
-      await fs.access(candidate);
+      await Promise.all(
+        ["bash.exe", "ps.exe", "kill.exe"].map((name) =>
+          fs.access(path.join(path.dirname(candidate), name)),
+        ),
+      );
       bashPath = candidate;
     } catch {
       throwIfProvisionAborted(args.signal);
@@ -213,16 +262,25 @@ async function runLifecycleScript(
     return () => emit(decoder.end());
   });
 
+  const stopScript = () => {
+    if (
+      bashPath !== undefined &&
+      child.pid !== undefined &&
+      killGitBashProcessGroup(bashPath, child.pid)
+    )
+      return;
+    killProcessGroup({ child, signal: "SIGKILL" });
+  };
   const timeout = setTimeout(() => {
     timedOut = true;
-    killProcessGroup({ child, signal: "SIGKILL" });
+    stopScript();
   }, timeoutMs);
   const abortLifecycleScript = () => {
     if (abortRequested) {
       return;
     }
     abortRequested = true;
-    killProcessGroup({ child, signal: "SIGKILL" });
+    stopScript();
   };
   args.signal?.addEventListener("abort", abortLifecycleScript, {
     once: true,

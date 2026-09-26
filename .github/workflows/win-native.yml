@@ -25,7 +25,6 @@ on:
           - worktree
           - desktop-worktree
           - regressions
-          - diagnostics
 
 permissions:
   contents: read
@@ -83,12 +82,8 @@ jobs:
         if: matrix.group == 'core'
         timeout-minutes: 15
         run: pnpm exec turbo run typecheck --concurrency=2 --env-mode=loose --continue=always
-      - name: Diagnose Windows script cancellation
-        if: matrix.group == 'diagnostics'
-        timeout-minutes: 2
-        run: node --conditions=source --import tsx scripts/diagnose-windows-lifecycle.mjs
       - name: Test Windows runtime and shared contracts
-        if: ${{ !cancelled() && matrix.group != 'diagnostics' && steps.dependencies.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         timeout-minutes: 20
         env:
           TEST_GROUP: ${{ matrix.group }}
@@ -101,7 +96,7 @@ jobs:
             cli = '@bb/cli'
             daemon = '@bb/host-daemon'
             worktree = 'bb-plugin-environment-git-worktree'
-            regressions = '@bb/process-utils @bb/provider-bridge-protocol @bb/provider-bridge-acp @bb/agent-runtime bb-plugin-provider-claude-code bb-plugin-provider-codex @bb/host-daemon @bb/server bb-plugin-environment-git-worktree'
+            regressions = '@bb/process-utils @bb/provider-bridge-protocol @bb/provider-bridge-acp @bb/agent-runtime bb-plugin-provider-claude-code bb-plugin-provider-codex @bb/host-daemon @bb/server @bb/cli bb-plugin-environment-git-worktree'
           }
           $testFiles = @()
           if ($env:TEST_GROUP -eq 'regressions') {
@@ -111,6 +106,7 @@ jobs:
               'environment-lifecycle-script.test.ts', 'server-move/activation.test.ts', 'server-move/service-definition.test.ts',
               'command/environment-dispatch.test.ts', 'command/environment-hook.test.ts',
               'install-machine-ps1.test.ts', 'plugin-authoring-docs.test.ts', 'host-environment.test.ts',
+              'bb-app-artifact.test.ts', 'services/plugins/plugin-install.test.ts', 'cli-entry-errors.e2e.test.ts',
               'host/paths.test.ts', 'host.test.ts'
             )
           }
