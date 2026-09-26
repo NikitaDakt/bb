@@ -52,7 +52,10 @@ describe("rewriteManagedConfigServer", () => {
       serverUrl: "https://new.example.test",
       serverHeaders: { "x-bb-connect-machine": "bbcm_new" },
     });
-    expect((await stat(join(dataDir, "config.json"))).mode & 0o777).toBe(0o600);
+    expect(
+      (await stat(join(dataDir, "config.json"))).mode &
+        (process.platform === "win32" ? 0o600 : 0o777),
+    ).toBe(0o600);
   });
 
   it("removes serverHeaders when the new server needs none", async () => {

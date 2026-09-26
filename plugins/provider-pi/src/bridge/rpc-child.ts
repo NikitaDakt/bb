@@ -166,7 +166,7 @@ export class PiRpcChild {
     }
     const settleExit = (code: number | null, signal: NodeJS.Signals | null) => {
       if (this.exitInfo !== null) {
-        return;
+        return this.exitInfo;
       }
       if (this.killEscalation !== null) {
         clearTimeout(this.killEscalation);
@@ -178,19 +178,21 @@ export class PiRpcChild {
         stderrTail: this.stderrTail,
       };
       this.exitInfo = info;
-      resolveSettledExit(info);
       for (const [, pending] of this.pending) {
         if (pending.timer !== null) clearTimeout(pending.timer);
         pending.reject(new PiRpcChildExitedError(info));
       }
       this.pending.clear();
       args.onExit(info);
+      return info;
     };
     this.child.on("error", (error) => {
       this.stderrTail = `${this.stderrTail}${error.message}`;
     });
     this.child.on("exit", settleExit);
-    this.child.on("close", (code, signal) => settleExit(code, signal));
+    this.child.on("close", (code, signal) =>
+      resolveSettledExit(settleExit(code, signal)),
+    );
   }
 
   get exited(): boolean {

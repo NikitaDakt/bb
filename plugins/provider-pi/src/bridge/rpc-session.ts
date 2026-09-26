@@ -96,7 +96,7 @@ function waitForPiTransientAuthRetry(): Promise<void> {
 
 export async function runPiTransientAuthConstruction(args: {
   attempt: () => Promise<PiSessionConstructionOutcome>;
-  discardFailedAttempt: () => void;
+  discardFailedAttempt: () => void | Promise<void>;
   isClosed: () => boolean;
   waitBeforeRetry: () => Promise<void>;
 }): Promise<void> {
@@ -108,7 +108,7 @@ export async function runPiTransientAuthConstruction(args: {
     if (attempt >= PI_TRANSIENT_AUTH_MAX_RETRIES || args.isClosed()) {
       throw outcome.error;
     }
-    args.discardFailedAttempt();
+    await args.discardFailedAttempt();
     await args.waitBeforeRetry();
   }
 }
@@ -182,10 +182,11 @@ export class PiRpcSession {
   async start(): Promise<void> {
     await runPiTransientAuthConstruction({
       attempt: () => this.spawnAndVerify(),
-      discardFailedAttempt: () => {
+      discardFailedAttempt: async () => {
         const failed = this.child;
         this.child = undefined;
         failed?.kill();
+        await failed?.waitForExit();
       },
       isClosed: () => this.closed,
       waitBeforeRetry: waitForPiTransientAuthRetry,
@@ -424,25 +425,29 @@ export class PiRpcSession {
       "Pi session closed before input was consumed",
     );
     this.closed = true;
-    if (!child || child.exited) {
+    if (!child) {
       return this.lastKnownLeafId ?? undefined;
     }
-    const deadline = Date.now() + timeoutMs;
-    await child
-      .request({ type: "abort" }, Math.max(1, Math.floor(timeoutMs / 2)))
-      .catch(() => undefined);
-    await this.refreshLeafId(Math.max(1, deadline - Date.now())).catch(
-      () => undefined,
-    );
-    child.closeGracefully();
+    if (!child.exited) {
+      const deadline = Date.now() + timeoutMs;
+      await child
+        .request({ type: "abort" }, Math.max(1, Math.floor(timeoutMs / 2)))
+        .catch(() => undefined);
+      await this.refreshLeafId(Math.max(1, deadline - Date.now())).catch(
+        () => undefined,
+      );
+      child.closeGracefully();
+    }
+    await child.waitForExit();
     this.isProcessing = false;
     this.isCompacting = false;
     return this.lastKnownLeafId ?? undefined;
   }
 
-  kill(): void {
+  async kill(): Promise<void> {
     this.closed = true;
     this.child?.kill();
+    await this.child?.waitForExit();
   }
 
   static async forkSessionFile(args: {
@@ -483,7 +488,7 @@ export class PiRpcSession {
           : { checkpointId: args.checkpointId }),
       });
     } finally {
-      session.kill();
+      await session.kill();
     }
   }
 

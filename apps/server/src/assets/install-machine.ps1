@@ -225,7 +225,7 @@ function Get-PortReservationOwner {
   param([string]$Port)
   $ownerFile = Join-Path (Join-Path $script:PortRegistryDir $Port) 'data-dir'
   try {
-    return ((Get-Content -Path $ownerFile -TotalCount 1 -ErrorAction Stop) | ForEach-Object { "$_" }) -join "`n"
+    return [IO.File]::ReadAllText($ownerFile, [Text.Encoding]::UTF8).TrimEnd([char[]]"`r`n")
   } catch {
     return ''
   }
@@ -266,7 +266,7 @@ function Register-ExistingDefaultPorts {
     if (-not (Test-ValidPort -RawPort $existingPort)) {
       continue
     }
-    $canonical = Invoke-NodeScript 'const fs = require("node:fs"); process.stdout.write(fs.realpathSync(process.argv[2]));' @($entry.FullName)
+    $canonical = Invoke-NodeScript 'const fs = require("node:fs"); process.stdout.write(fs.realpathSync.native(process.argv[2]));' @($entry.FullName)
     if ($canonical.ExitCode -ne 0) {
       continue
     }

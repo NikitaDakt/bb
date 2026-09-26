@@ -1,5 +1,6 @@
 import { once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
@@ -252,6 +253,30 @@ describe("process utils", () => {
     expect(exitCode).toBe(0);
     expect(child.stdin).toBeNull();
     expect(Buffer.concat(stdoutChunks).toString("utf8")).toBe("closed");
+  });
+
+  it("starts a child in a directory longer than the Windows MAX_PATH limit", async () => {
+    const root = mkdtempSync(join(tmpdir(), "bb-long-cwd-"));
+    const cwd = join(root, "project".repeat(18), "workspace".repeat(16));
+    try {
+      await mkdir(cwd, { recursive: true });
+      await writeFile(join(cwd, "marker"), "long-path-ready");
+      const child = spawnPortableOutputProcess({
+        command: process.execPath,
+        args: [
+          "-e",
+          'process.stdout.write(require("node:fs").readFileSync("marker"));',
+        ],
+        cwd,
+      });
+      const chunks: Buffer[] = [];
+      child.stdout.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+      const [code] = await once(child, "close");
+      expect(code).toBe(0);
+      expect(Buffer.concat(chunks).toString()).toBe("long-path-ready");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("resolves paths that stay within the configured root", () => {

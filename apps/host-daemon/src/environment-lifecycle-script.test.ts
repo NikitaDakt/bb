@@ -81,7 +81,7 @@ describe("core environment scripts", () => {
   it("runs in the environment directory and streams stdout and stderr", async () => {
     const workspacePath = await workspace(
       "setup",
-      "pwd > marker\nprintf 'first\\rsecond\\n'\necho stderr >&2\n",
+      `${process.platform === "win32" ? "pwd -W" : "pwd"} > marker\nprintf 'first\\rsecond\\n'\necho stderr >&2\n`,
     );
     const output: string[] = [];
     await runSetupScript({
@@ -90,7 +90,9 @@ describe("core environment scripts", () => {
       onProgress: (entry) => output.push(entry.text),
     });
     expect((await readFile(join(workspacePath, "marker"), "utf8")).trim()).toBe(
-      await realpath(workspacePath),
+      process.platform === "win32"
+        ? (await realpath(workspacePath)).replaceAll("\\", "/")
+        : await realpath(workspacePath),
     );
     expect(output).toContain("second");
     expect(output).toContain("stderr");

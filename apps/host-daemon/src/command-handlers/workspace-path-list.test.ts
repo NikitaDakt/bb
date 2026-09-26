@@ -66,11 +66,13 @@ describe("workspace path discovery", () => {
     await write(root, "local-output/ignored.txt");
     await write(root, ".state/drop.txt");
     await write(root, ".state/keep.txt");
-    await write(root, "src/new\nfile.ts");
-    await write(root, "src/ignored\nfile.log");
+    const specialName = process.platform === "win32" ? " & Кириллица " : "\n";
+    const sourceFile = `src/new${specialName}file.ts`;
+    await write(root, sourceFile);
+    await write(root, `src/ignored${specialName}file.log`);
     await write(root, "src/.gitignore", "*.log\n");
     await fs.mkdir(path.join(root, "empty"));
-    await fs.symlink("src/new\nfile.ts", path.join(root, "link.ts"));
+    await fs.symlink(sourceFile, path.join(root, "link.ts"));
 
     expect(await paths(root)).toEqual([
       ".generated",
@@ -84,7 +86,7 @@ describe("workspace path discovery", () => {
       "empty",
       "src",
       "src/.gitignore",
-      "src/new\nfile.ts",
+      sourceFile,
     ]);
   });
 

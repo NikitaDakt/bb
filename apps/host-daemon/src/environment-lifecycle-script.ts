@@ -140,6 +140,7 @@ async function runLifecycleScript(
         "..",
         "..",
         "..",
+        "usr",
         "bin",
         "bash.exe",
       );
@@ -172,6 +173,13 @@ async function runLifecycleScript(
     args.contributedEnv ?? [],
     {
       ...(args.env ?? process.env),
+      ...(bashPath !== undefined &&
+      args.env?.PATH === undefined &&
+      args.shellPath === undefined
+        ? {
+            PATH: `${path.dirname(bashPath)}${path.delimiter}${process.env.PATH ?? process.env.Path ?? ""}`,
+          }
+        : {}),
       ...(args.shellPath !== undefined ? { PATH: args.shellPath } : {}),
     },
     true,

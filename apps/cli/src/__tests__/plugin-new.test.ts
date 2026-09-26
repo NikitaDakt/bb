@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PLUGIN_SDK_VERSION } from "@bb/domain";
+import * as pluginBuild from "@bb/plugin-build";
 import { RESERVED_BB_CLI_COMMANDS } from "@bb/domain/plugin-cli";
 import { Command } from "commander";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -196,7 +197,13 @@ describe.sequential("bb plugin new dependency install", () => {
   });
 
   it("falls back to the manual step when npm is not on PATH", async () => {
+    vi.spyOn(pluginBuild, "resolveBundledNpmCli").mockImplementation(() => {
+      throw new Error("Bundled npm is unavailable");
+    });
     vi.stubEnv("PATH", join(workDir, "empty-bin"));
+    if (process.platform === "win32") {
+      vi.stubEnv("Path", join(workDir, "empty-bin"));
+    }
 
     await runPluginNew(["no-npm"]);
 

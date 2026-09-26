@@ -478,15 +478,15 @@ export class PluginHostManager {
       await rm(tempDir, { recursive: true, force: true });
       throw error;
     }
-    const closed = new Promise<void>((resolve) => child.once("close", resolve));
-    void closed
-      .then(() => rm(tempDir, { recursive: true, force: true }))
-      .catch((error) => {
-        this.options.logger.warn(
-          { pluginId: command.pluginId, err: error },
-          "Failed to remove host plugin temporary directory",
-        );
-      });
+    const closed = new Promise<void>((resolve) =>
+      child.once("close", resolve),
+    ).then(() => rm(tempDir, { recursive: true, force: true }));
+    void closed.catch((error) => {
+      this.options.logger.warn(
+        { pluginId: command.pluginId, err: error },
+        "Failed to remove host plugin temporary directory",
+      );
+    });
     let resolveReady!: () => void;
     let rejectReady!: (error: Error) => void;
     const ready = new Promise<void>((resolve, reject) => {
@@ -1049,7 +1049,6 @@ export class PluginHostManager {
       "Host plugin worker stopped",
     );
     this.rejectPendingCalls(worker, reason);
-    await rm(worker.tempDir, { recursive: true, force: true });
   }
 
   private cancelWorkerIdleTimer(worker: WorkerState): void {

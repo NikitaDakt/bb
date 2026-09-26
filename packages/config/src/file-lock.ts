@@ -13,7 +13,9 @@ let loadedNativeFileLocks: NativeFileLocks | undefined;
 
 function loadNativeFileLocks(): NativeFileLocks {
   if (loadedNativeFileLocks !== undefined) return loadedNativeFileLocks;
-  const value: unknown = createRequire(import.meta.url)("fs-native-extensions");
+  const value: unknown = createRequire(
+    typeof __filename === "string" ? __filename : import.meta.url,
+  )("fs-native-extensions");
   if (
     value === null ||
     typeof value !== "object" ||

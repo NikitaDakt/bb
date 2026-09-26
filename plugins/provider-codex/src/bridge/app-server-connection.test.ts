@@ -205,7 +205,7 @@ describe("codex app-server connection", () => {
       'process.stdin.once("data", () => {',
       'process.stderr.write("fixture stderr\\n");',
       `process.stdout.write(${JSON.stringify(childRequestLine())}, () => {`,
-      `const descendant = spawn(process.execPath, ["-e", ${JSON.stringify(descendantScript)}], { stdio: ["ignore", 1, "ignore", "ipc"] });`,
+      `const descendant = spawn(process.execPath, ["-e", ${JSON.stringify(descendantScript)}], { detached: process.platform === "win32", stdio: ["ignore", 1, "ignore", "ipc"] });`,
       'descendant.once("message", () => process.exit(7));',
       "});",
       "});",
@@ -288,11 +288,13 @@ describe("codex app-server connection", () => {
       args: [
         "-e",
         [
-          "process.stdin.destroy();",
+          'process.stdin.once("close", () => {',
           'require("node:fs").closeSync(0);',
           `process.stdout.write(${JSON.stringify(
             `${JSON.stringify({ jsonrpc: "2.0", method: "ready" })}\n`,
           )});`,
+          "});",
+          "process.stdin.destroy();",
           'process.on("SIGTERM", () => {});',
           "setTimeout(() => process.exit(0), 1000);",
         ].join(""),
