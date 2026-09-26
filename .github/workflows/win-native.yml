@@ -87,6 +87,7 @@ jobs:
         timeout-minutes: 20
         env:
           TEST_GROUP: ${{ matrix.group }}
+          BB_TEST_TOOLCHAIN_FETCH: ${{ (matrix.group == 'core' || matrix.group == 'regressions') && '1' || '0' }}
         run: |
           $packages = @{
             desktop = '@bb/desktop'
@@ -96,7 +97,7 @@ jobs:
             cli = '@bb/cli'
             daemon = '@bb/host-daemon'
             worktree = 'bb-plugin-environment-git-worktree'
-            regressions = '@bb/process-utils @bb/provider-bridge-protocol @bb/provider-bridge-acp @bb/agent-runtime bb-plugin-provider-claude-code bb-plugin-provider-codex @bb/host-daemon @bb/server @bb/cli bb-plugin-environment-git-worktree'
+            regressions = '@bb/process-utils @bb/plugin-build @bb/provider-bridge-protocol @bb/provider-bridge-acp @bb/agent-runtime bb-plugin-provider-claude-code bb-plugin-provider-codex @bb/host-daemon @bb/server @bb/cli bb-plugin-environment-git-worktree'
           }
           $testFiles = @()
           if ($env:TEST_GROUP -eq 'regressions') {
@@ -107,6 +108,7 @@ jobs:
               'command/environment-dispatch.test.ts', 'command/environment-hook.test.ts',
               'install-machine-ps1.test.ts', 'plugin-authoring-docs.test.ts', 'host-environment.test.ts',
               'bb-app-artifact.test.ts', 'services/plugins/plugin-install.test.ts', 'cli-entry-errors.e2e.test.ts',
+              'toolchain.test.ts', 'services/plugins/plugin-app-bundle.test.ts',
               'host/paths.test.ts', 'host.test.ts'
             )
           }

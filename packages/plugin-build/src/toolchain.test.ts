@@ -111,59 +111,56 @@ describe("plugin build toolchain", () => {
       600_000,
     );
 
-    it.skipIf(process.platform === "win32")(
-      "fetches with the shipped npm and excludes script-policy config without PATH executables",
-      async () => {
-        const envDump = join(baseDir, "npm-env.txt");
-        const preload = join(baseDir, "capture-npm-env.mjs");
-        await writeFile(
-          preload,
-          [
-            'import { writeFileSync } from "node:fs";',
-            `writeFileSync(${JSON.stringify(envDump)}, Object.entries(process.env).map(([key, value]) => key + "=" + value).join("\\n"));`,
-            "process.exit(0);",
-          ].join("\n"),
-        );
+    it("fetches with the shipped npm and excludes script-policy config without PATH executables", async () => {
+      const envDump = join(baseDir, "npm-env.txt");
+      const preload = join(baseDir, "capture-npm-env.mjs");
+      await writeFile(
+        preload,
+        [
+          'import { writeFileSync } from "node:fs";',
+          `writeFileSync(${JSON.stringify(envDump)}, Object.entries(process.env).map(([key, value]) => key + "=" + value).join("\\n"));`,
+          "process.exit(0);",
+        ].join("\n"),
+      );
 
-        const overrides: Record<string, string> = {
-          PATH: baseDir,
-          NODE_OPTIONS: `--import=${pathToFileURL(preload).href}`,
-          npm_config_allow_scripts: "@github/keytar,node-pty",
-          NPM_CONFIG_IGNORE_SCRIPTS: "false",
-          npm_config_registry: "https://registry.example.invalid/",
-        };
-        const previous = new Map<string, string | undefined>();
-        for (const [key, value] of Object.entries(overrides)) {
-          previous.set(key, process.env[key]);
-          process.env[key] = value;
+      const overrides: Record<string, string> = {
+        PATH: baseDir,
+        NODE_OPTIONS: `--import=${pathToFileURL(preload).href}`,
+        npm_config_allow_scripts: "@github/keytar,node-pty",
+        NPM_CONFIG_IGNORE_SCRIPTS: "false",
+        npm_config_registry: "https://registry.example.invalid/",
+      };
+      const previous = new Map<string, string | undefined>();
+      for (const [key, value] of Object.entries(overrides)) {
+        previous.set(key, process.env[key]);
+        process.env[key] = value;
+      }
+      try {
+        await expect(
+          resolvePluginBuildToolchain(baseDir, { ignoreLocal: true }),
+        ).rejects.toThrow(/incomplete or misversioned/);
+      } finally {
+        for (const [key, value] of previous) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
         }
-        try {
-          await expect(
-            resolvePluginBuildToolchain(baseDir, { ignoreLocal: true }),
-          ).rejects.toThrow(/incomplete or misversioned/);
-        } finally {
-          for (const [key, value] of previous) {
-            if (value === undefined) delete process.env[key];
-            else process.env[key] = value;
-          }
-        }
+      }
 
-        const seen = new Map(
-          (await readFile(envDump, "utf8"))
-            .split("\n")
-            .filter((line) => line.includes("="))
-            .map((line) => {
-              const at = line.indexOf("=");
-              return [line.slice(0, at), line.slice(at + 1)] as const;
-            }),
-        );
-        expect(seen.has("npm_config_allow_scripts")).toBe(false);
-        expect(seen.has("NPM_CONFIG_IGNORE_SCRIPTS")).toBe(false);
-        expect(seen.get("npm_config_registry")).toBe(
-          "https://registry.example.invalid/",
-        );
-      },
-    );
+      const seen = new Map(
+        (await readFile(envDump, "utf8"))
+          .split("\n")
+          .filter((line) => line.includes("="))
+          .map((line) => {
+            const at = line.indexOf("=");
+            return [line.slice(0, at), line.slice(at + 1)] as const;
+          }),
+      );
+      expect(seen.has("npm_config_allow_scripts")).toBe(false);
+      expect(seen.has("NPM_CONFIG_IGNORE_SCRIPTS")).toBe(false);
+      expect(seen.get("npm_config_registry")).toBe(
+        "https://registry.example.invalid/",
+      );
+    });
 
     it("reuses an already-fetched toolchain without reinstalling", async () => {
       const local = await resolvePluginBuildToolchain(baseDir);

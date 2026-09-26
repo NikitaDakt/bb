@@ -9,6 +9,7 @@ import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { upsertInstalledPlugin } from "@bb/db";
 import { PLUGIN_SDK_MAJOR, PLUGIN_SDK_VERSION } from "@bb/domain";
+import { resolveBundledNpmCli } from "@bb/plugin-build";
 import {
   createTestAppHarness,
   type TestAppHarness,
@@ -17,17 +18,6 @@ import {
 const BASE = "http://127.0.0.1:3334";
 
 const run = promisify(execFile);
-
-async function hasBinary(command: string): Promise<boolean> {
-  try {
-    await run(command, ["--version"]);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-const hasNpm = await hasBinary("npm");
 
 function npmPersistence(packageName: string, version: string) {
   return {
@@ -578,7 +568,7 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
     expect(response.status).toBe(404);
   });
 
-  describe.skipIf(!hasNpm)("npm install policy", () => {
+  describe("npm install policy", () => {
     it(
       "refuses npm installs without a prebuilt bundle and accepts prebuilt ones",
       { timeout: 180_000 },
@@ -638,9 +628,13 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
           ["bb-plugin-prebuilt", prebuiltDir],
           ["bb-plugin-partial", partialDir],
         ] as const) {
-          await run("npm", ["pack", "--pack-destination", packDir], {
-            cwd: dir,
-          });
+          await run(
+            process.execPath,
+            [resolveBundledNpmCli(), "pack", "--pack-destination", packDir],
+            {
+              cwd: dir,
+            },
+          );
           tarballs.set(
             name,
             await readFile(join(packDir, `${name}-0.1.0.tgz`)),

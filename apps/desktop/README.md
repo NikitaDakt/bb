@@ -1,8 +1,40 @@
 # @bb/desktop
 
-macOS and Linux Electron shell for bb. The desktop app loads the existing bb
+macOS, Linux and Windows Electron shell for bb. The desktop app loads the existing bb
 web UI and uses the packaged `bb-app` launcher for server and host-daemon
 lifecycle.
+
+## Windows candidates
+
+Run the Native Windows workflow on this branch with `test_group=all` and
+`build_installer=true`. A successful Desktop job uploads a `windows-installer-<sha>`
+artifact containing the NSIS Setup executable and update metadata. Check the
+results of all six groups before choosing a candidate. These artifacts do not
+publish a release or change npm dist-tags.
+
+Extract the archive and run the Setup executable. It installs `wbb.exe` for the
+current user and lets you choose its directory. Use native Windows installations
+of Git and your agent providers. External `bb` CLI commands require Windows
+Node.js; the Desktop runtime includes its own Node runtime. Git Bash is used only
+for legacy `.bb-env-*.sh` hooks; `.bb-env-*.ps1` takes precedence on Windows.
+
+For a first run with separate BB data and an Electron profile, use Windows
+PowerShell. Adjust `$app` if you selected a different installation directory:
+
+```powershell
+$trial = Join-Path $env:LOCALAPPDATA 'bb-native-preview'
+$env:BB_DATA_DIR = Join-Path $trial 'data'
+$app = Join-Path $env:LOCALAPPDATA 'Programs\wbb\wbb.exe'
+& $app "--user-data-dir=$(Join-Path $trial 'desktop')"
+```
+
+Use a Windows repository path such as `C:\src\project` when testing without WSL.
+Existing WSL data and repositories are not migrated by installing this candidate.
+The automated runner is Windows Server 2022; Windows 11 account sign-in and
+private plugins need their own acceptance. The upgrade smoke uses a synthetic
+lower Desktop version with the current runtime/schema to test NSIS replacement
+and data retention. It does not verify historical database migrations or the
+check/download/quitAndInstall update flow.
 
 ## Development
 
@@ -214,11 +246,11 @@ so a single publisher is what keeps one platform from deleting the other's
 binaries. Each platform has its own update feed file inside the same release
 tag:
 
-| Platform | Artifacts              | electron-updater metadata | Version feed                 |
-| -------- | ---------------------- | ------------------------- | ---------------------------- |
-| macOS    | `.dmg`, `.zip` (arm64) | `latest-mac.yml`          | `desktop-version.json`       |
-| Linux    | `.AppImage` (x64)      | `latest-linux.yml`        | `desktop-version-linux.json` |
-| Windows  | NSIS `.exe` (x64)      | `latest.yml`              | none (installer path only)   |
+| Platform | Artifacts              | electron-updater metadata | Version feed                   |
+| -------- | ---------------------- | ------------------------- | ------------------------------ |
+| macOS    | `.dmg`, `.zip` (arm64) | `latest-mac.yml`          | `desktop-version.json`         |
+| Linux    | `.AppImage` (x64)      | `latest-linux.yml`        | `desktop-version-linux.json`   |
+| Windows  | NSIS `.exe` (x64)      | `latest.yml`              | `desktop-version-windows.json` |
 
 Windows polls its own moving release, `desktop-win-latest` (nightly:
 `desktop-win-nightly`), which `win-release.yml` resets to the same assets on

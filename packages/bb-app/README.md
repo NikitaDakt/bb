@@ -37,6 +37,13 @@ credentials. If you use multiple providers, you can mix and match per task.
 
 - macOS
 - Linux
+- Native Windows x64 in this branch; use Windows Node.js, Git for Windows,
+  and native provider CLIs with Windows repository paths.
+
+The published `latest` and `nightly` npm commands below do not install this
+branch. For its native Windows Desktop installer, see
+[Windows candidates](../../apps/desktop/README.md#windows-candidates)
+in the source checkout and the Native Windows workflow.
 
 <details>
 <summary>Windows via Ubuntu on WSL2</summary>
@@ -45,8 +52,7 @@ Run all `bb` commands inside WSL2, install Node.js, Git, and your provider CLIs
 inside that WSL2 distro, and use Linux-style paths such as `/home/me/repo` or
 `/mnt/c/Users/me/repo`.
 
-Native Windows PowerShell, CMD, drive-letter paths, and UNC paths are not
-supported product paths. Repos inside the WSL filesystem are recommended;
+For the WSL setup, repos inside the WSL filesystem are recommended;
 `/mnt/c/...` is intentionally supported so you can keep an existing Windows
 checkout, but it is slower and less reliable for file watching.
 

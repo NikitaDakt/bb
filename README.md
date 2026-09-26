@@ -36,10 +36,11 @@ The recommended way to start using bb is the desktop app:
 
 The desktop app supports macOS on Apple Silicon (arm64). The Linux x64 AppImage
 is alpha: expect problems, and please report them. Intel Mac users should run bb
-with `npx` instead. On Windows, run bb inside
-[WSL2 (Windows Subsystem for Linux)](https://learn.microsoft.com/windows/wsl/install):
-install WSL2 first, then run the same `npx` command below from your WSL2 (Linux)
-shell. Native Windows PowerShell and CMD are not supported.
+with `npx` instead. This branch also builds a native Windows x64 NSIS installer.
+See [Windows candidates](apps/desktop/README.md#windows-candidates) for installation
+and a first run with separate data. The `npx` commands below install published npm
+versions, not this branch. Windows users can also run those commands inside
+[WSL2](https://learn.microsoft.com/windows/wsl/install).
 
 Early adopters can install
 **[bb Nightly](https://github.com/get-bb/bb/releases/tag/desktop-nightly)**
