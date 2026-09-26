@@ -173,6 +173,42 @@ jobs:
             if ($uninstall.ExitCode -ne 0) { throw "Uninstaller exited with $($uninstall.ExitCode)" }
           }
           if (Test-Path "$installDir/wbb.exe") { throw 'Uninstaller left the installed application' }
+      - name: Installed version upgrade and data retention
+        if: ${{ success() && steps.installer.outcome == 'success' }}
+        timeout-minutes: 20
+        env:
+          BB_DESKTOP_RELEASE_REPOSITORY: ${{ github.repository }}
+        run: |
+          $candidate = @(Get-ChildItem apps/desktop/release/*Setup*.exe)
+          if ($candidate.Count -ne 1) { throw 'Expected one candidate installer' }
+          $manifestPath = Join-Path $PWD 'apps/desktop/package.json'
+          $originalManifest = [IO.File]::ReadAllText($manifestPath)
+          $manifest = $originalManifest | ConvertFrom-Json
+          $candidateVersion = $manifest.version
+          $baselineVersion = '0.0.0-native-upgrade-test'
+          $baselineOutput = Join-Path $env:RUNNER_TEMP 'bb-upgrade-baseline'
+          $distPath = Join-Path $PWD 'apps/desktop/dist'
+          $distBackup = Join-Path $env:RUNNER_TEMP 'bb-upgrade-candidate-dist'
+          Copy-Item -LiteralPath $distPath -Destination $distBackup -Recurse
+          try {
+            $manifest.version = $baselineVersion
+            [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 20))
+            pnpm exec turbo run build --filter=@bb/desktop --concurrency=2 --env-mode=loose
+            if ($LASTEXITCODE) { throw 'Baseline runtime build failed' }
+            Push-Location apps/desktop
+            try {
+              node scripts/run-electron-builder.mjs --win --x64 --publish never "--config.directories.output=$baselineOutput"
+              if ($LASTEXITCODE) { throw 'Baseline installer build failed' }
+            } finally { Pop-Location }
+          } finally {
+            [IO.File]::WriteAllText($manifestPath, $originalManifest)
+            Remove-Item -LiteralPath $distPath -Recurse -Force
+            Move-Item -LiteralPath $distBackup -Destination $distPath
+          }
+          $baseline = @(Get-ChildItem "$baselineOutput/*Setup*.exe")
+          if ($baseline.Count -ne 1) { throw 'Expected one synthetic baseline installer' }
+          node apps/desktop/scripts/smoke-windows-upgrade.mjs --baseline-installer $baseline[0].FullName --baseline-version $baselineVersion --candidate-installer $candidate[0].FullName --candidate-version $candidateVersion --evidence-dir .rt/windows-native/upgrade
+          if ($LASTEXITCODE) { throw 'Installed version upgrade failed' }
       - name: Upload test evidence
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
