@@ -77,6 +77,7 @@ Context breakdowns are optional snapshots on `contextWindow` deltas:
 - `errorEnvelopeSchema`
 - `experimental_BridgeRecoveryError`
 - `experimental_COMPACTION_PRESENTATION`
+- `experimental_PortableCommandError`
 - `experimental_REASONING_PRESENTATION`
 - `experimental_buildBridgeToolCallContent`
 - `experimental_clampPercent`
@@ -98,6 +99,7 @@ Context breakdowns are optional snapshots on `contextWindow` deltas:
 - `experimental_presentationTitle`
 - `experimental_probeNpmGlobalPackage`
 - `experimental_readBoundedLines`
+- `experimental_runPortableCommandCapture`
 - `experimental_readCliVersion`
 - `experimental_recordProviderChildIo`
 - `experimental_resolveExecutablePath`

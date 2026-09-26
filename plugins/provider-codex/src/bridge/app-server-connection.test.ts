@@ -283,22 +283,43 @@ describe("codex app-server connection", () => {
   it("makes a broken child stdin immediately terminal", async () => {
     const ready = deferred<void>();
     const exited = deferred<CodexAppServerExitInfo>();
+    const readyLine = JSON.stringify({ jsonrpc: "2.0", method: "ready" });
     const connection = createCodexAppServerConnection({
-      command: process.execPath,
-      args: [
-        "-e",
-        [
-          'process.stdin.once("close", () => {',
-          'require("node:fs").closeSync(0);',
-          `process.stdout.write(${JSON.stringify(
-            `${JSON.stringify({ jsonrpc: "2.0", method: "ready" })}\n`,
-          )});`,
-          "});",
-          "process.stdin.destroy();",
-          'process.on("SIGTERM", () => {});',
-          "setTimeout(() => process.exit(0), 1000);",
-        ].join(""),
-      ],
+      command:
+        process.platform === "win32" ? "powershell.exe" : process.execPath,
+      args:
+        process.platform === "win32"
+          ? [
+              "-NoLogo",
+              "-NoProfile",
+              "-NonInteractive",
+              "-Command",
+              [
+                'Add-Type -TypeDefinition @"',
+                "using System;",
+                "using System.Runtime.InteropServices;",
+                "public static class StdinFixture {",
+                '  [DllImport("kernel32.dll")] public static extern IntPtr GetStdHandle(int id);',
+                '  [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);',
+                "}",
+                '"@',
+                'if (-not [StdinFixture]::CloseHandle([StdinFixture]::GetStdHandle(-10))) { throw "Could not close stdin" }',
+                `Write-Output '${readyLine}'`,
+                "Start-Sleep -Seconds 30",
+              ].join("\n"),
+            ]
+          : [
+              "-e",
+              [
+                'process.stdin.once("close", () => {',
+                'require("node:fs").closeSync(0);',
+                `process.stdout.write(${JSON.stringify(`${readyLine}\n`)});`,
+                "});",
+                "process.stdin.destroy();",
+                'process.on("SIGTERM", () => {});',
+                "setTimeout(() => process.exit(0), 1000);",
+              ].join(""),
+            ],
       cwd: process.cwd(),
       env: process.env,
       recordThreadId: null,

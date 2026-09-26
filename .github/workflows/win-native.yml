@@ -24,6 +24,7 @@ on:
           - daemon
           - worktree
           - desktop-worktree
+          - regressions
 
 permissions:
   contents: read
@@ -47,7 +48,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        group: ${{ fromJSON(inputs.test_group == 'desktop-worktree' && '["desktop","worktree"]' || inputs.test_group && inputs.test_group != 'all' && format('["{0}"]', inputs.test_group) || '["desktop","core","providers","server","cli","daemon"]') }}
+        group: ${{ fromJSON(inputs.test_group == 'desktop-worktree' && '["desktop","worktree"]' || inputs.test_group == 'regressions' && '["desktop","regressions"]' || inputs.test_group && inputs.test_group != 'all' && format('["{0}"]', inputs.test_group) || '["desktop","core","providers","server","cli","daemon"]') }}
     defaults:
       run:
         shell: pwsh
@@ -95,11 +96,25 @@ jobs:
             cli = '@bb/cli'
             daemon = '@bb/host-daemon'
             worktree = 'bb-plugin-environment-git-worktree'
+            regressions = '@bb/process-utils @bb/provider-bridge-protocol @bb/provider-bridge-acp @bb/agent-runtime bb-plugin-provider-claude-code bb-plugin-provider-codex @bb/host-daemon @bb/server bb-plugin-environment-git-worktree'
+          }
+          $testFiles = @()
+          if ($env:TEST_GROUP -eq 'regressions') {
+            $testFiles = @(
+              'windows-process-sweep.test.ts', 'provider-maintenance-kit.test.ts', 'provider-maintenance.test.ts',
+              'runtime.process-lifecycle.test.ts', 'app-server-connection.test.ts',
+              'environment-lifecycle-script.test.ts', 'server-move/activation.test.ts', 'server-move/service-definition.test.ts',
+              'command/environment-dispatch.test.ts', 'command/environment-hook.test.ts',
+              'install-machine-ps1.test.ts', 'plugin-authoring-docs.test.ts', 'host-environment.test.ts',
+              'host/paths.test.ts', 'host.test.ts'
+            )
           }
           $filters = @($packages[$env:TEST_GROUP] -split '\s+' | ForEach-Object { "--filter=$_" })
           $testArguments = @('exec', 'turbo', 'run', 'test') + $filters + @(
             '--concurrency=1', '--env-mode=loose', '--continue=always', '--log-order=stream',
-            '--', '--maxWorkers=1', '--maxConcurrency=2', '--reporter=default', '--reporter=json', '--outputFile=.rt/windows-tests.json'
+            '--'
+          ) + $testFiles + @(
+            '--maxWorkers=1', '--maxConcurrency=2', '--reporter=default', '--reporter=json', '--outputFile=.rt/windows-tests.json'
           )
           Write-Output "Processes before tests: $(@(Get-Process).Count)"
           $testExitCode = 1

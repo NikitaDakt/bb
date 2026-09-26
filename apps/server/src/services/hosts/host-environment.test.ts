@@ -52,7 +52,7 @@ if [ "$1" = auth ]; then printf 'test-gh-secret\\n'; else printf '{"login":"octo
     if (process.platform === "win32") {
       await writeFile(
         join(bin, "gh.cmd"),
-        '@echo off\r\nif "%1"=="auth" (echo test-gh-secret) else (echo {"login":"octocat","id":123,"email":null})\r\n',
+        '@echo off\r\nif "%~1"=="auth" (echo test-gh-secret) else (echo {"login":"octocat","id":123,"email":null})\r\n',
       );
     }
     const searchPath = `${bin}${delimiter}${process.env.PATH}`;

@@ -274,10 +274,14 @@ function killWindowsProcessTreeSync(
   }
   try {
     const request = buildWindowsTaskkillRequest(pid);
-    const result = spawnSync(request.command, request.args, {
-      stdio: "ignore",
-      windowsHide: true,
-    });
+    const result = spawnSync(
+      windowsSystemCommand(request.command),
+      request.args,
+      {
+        stdio: "ignore",
+        windowsHide: true,
+      },
+    );
     return result.status === 0;
   } catch {
     return false;
@@ -314,6 +318,7 @@ export function stopProcessGroupLeaderFirst(
   if (platform === "win32") {
     return stopWindowsProcessTree({
       child: args.child,
+      timeoutMs: args.timeoutMs,
       killGraceMs: args.killGraceMs,
       runner: args.runWindowsCommand ?? defaultWindowsCommandRunner,
       isAlive: args.isProcessAlive ?? isProcessAlive,
@@ -380,6 +385,7 @@ export function stopProcessGroupLeaderFirst(
 
 async function stopWindowsProcessTree(args: {
   child: ChildProcess;
+  timeoutMs: number;
   killGraceMs: number;
   runner: WindowsCommandRunner;
   isAlive: (pid: number) => boolean;
@@ -393,8 +399,8 @@ async function stopWindowsProcessTree(args: {
     runner: args.runner,
     isAlive: args.isAlive,
   });
-  if (child.pid !== undefined && args.killGraceMs > 0) {
-    const reapDeadline = Date.now() + args.killGraceMs;
+  if (child.pid !== undefined) {
+    const reapDeadline = Date.now() + args.timeoutMs + args.killGraceMs;
     while (
       (!hasChildExited(child) || args.isAlive(child.pid)) &&
       Date.now() < reapDeadline
@@ -835,12 +841,22 @@ export function matchWindowsProcessesUnderDirectory(
 
 export const WINDOWS_PROCESS_ENUM_TIMEOUT_MS = 10_000;
 
+function windowsSystemCommand(command: string): string {
+  const systemRoot =
+    Object.entries(process.env).find(
+      ([key]) => key.toUpperCase() === "SYSTEMROOT",
+    )?.[1] ?? "C:\\Windows";
+  return command === "powershell.exe"
+    ? join(systemRoot, "System32", "WindowsPowerShell", "v1.0", command)
+    : join(systemRoot, "System32", command);
+}
+
 function defaultWindowsCommandRunner(
   request: WindowsCommandRequest,
 ): Promise<WindowsCommandResult> {
   return new Promise<WindowsCommandResult>((resolveRunner, rejectRunner) => {
     const child = spawnPortableOutputProcess({
-      command: request.command,
+      command: windowsSystemCommand(request.command),
       args: request.args,
     });
     const stdoutChunks: Buffer[] = [];

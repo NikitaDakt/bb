@@ -291,6 +291,9 @@ describe("Windows provider discovery through injected probes", () => {
     if (run.available) {
       expect(run.command.args[0]).toBe("-NoLogo");
       expect(run.command.displayCommand).toContain("powershell.exe");
+      expect(run.command.args.at(-1)).toContain(
+        "https://cursor.com/install?win32=true",
+      );
     }
   });
 });

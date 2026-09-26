@@ -1,4 +1,5 @@
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { chmod, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -349,7 +350,7 @@ describe("windows install commands", () => {
 
   it("downloads through powershell.exe argv on win32, never sh", () => {
     const built = downloadedInstallerCommand(
-      "https://cursor.com/install",
+      "https://cursor.com/install?win32=true",
       "win32",
     );
     expect(built.command).toBe("powershell.exe");
@@ -362,10 +363,46 @@ describe("windows install commands", () => {
     ]);
     expect(built.args).toHaveLength(6);
     const script = built.args[5] ?? "";
-    expect(script).toContain("'https://cursor.com/install'");
+    expect(script).toContain("'https://cursor.com/install?win32=true'");
     expect(script).toContain("Invoke-WebRequest");
-    expect(script).toContain("Get-Command bash");
+    expect(script).toContain("& $tmp");
+    expect(script).not.toContain("bash");
   });
+
+  it.runIf(process.platform === "win32").each([0, 7])(
+    "runs a native installer, preserves exit code %i and removes its temporary file",
+    async (exitCode) => {
+      const dir = await mkdtemp(
+        path.join(tmpdir(), "bb installer Кириллица [100%] &-"),
+      );
+      try {
+        const command = downloadedInstallerCommand(HOSTILE_URL, "win32");
+        const download = [
+          "function Invoke-WebRequest {",
+          "param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing)",
+          `Set-Content -LiteralPath $OutFile -Value 'Write-Output "installer ran"; exit ${exitCode}'`,
+          "}",
+        ].join("\n");
+        const result = spawnSync(
+          command.command,
+          [...command.args.slice(0, -1), `${download}\n${command.args.at(-1)}`],
+          {
+            env: { ...process.env, TEMP: dir, TMP: dir },
+            encoding: "utf8",
+            windowsHide: true,
+            timeout: 10_000,
+          },
+        );
+        expect(result.error).toBeUndefined();
+        expect(result.status, result.stderr).toBe(exitCode);
+        expect(result.stdout).toContain("installer ran");
+        expect(await readdir(dir)).toEqual([]);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    },
+    15_000,
+  );
 
   it("keeps a hostile installer URL inside one powershell argv element", () => {
     const built = downloadedInstallerCommand(HOSTILE_URL, "win32");

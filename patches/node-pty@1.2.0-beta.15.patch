@@ -1,0 +1,13 @@
+--- a/lib/windowsPtyAgent.js
++++ b/lib/windowsPtyAgent.js
+@@ -90,6 +90,10 @@
+             writable: true
+         });
+         this._inSocket.setEncoding('utf8');
++        this._outSocket.once('close', function () {
++            _this._inSocket.destroy();
++            _this._conoutSocketWorker.dispose();
++        });
+     }
+     Object.defineProperty(WindowsPtyAgent.prototype, "onError", {
+         get: function () { return this._onError.event; },
