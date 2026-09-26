@@ -257,7 +257,7 @@ export function readPluginProviderIcon(
 
 function mutableRootDir(rootDir: string): string {
   try {
-    return realpathSync(rootDir);
+    return realpathSync.native(rootDir);
   } catch {
     return rootDir;
   }
