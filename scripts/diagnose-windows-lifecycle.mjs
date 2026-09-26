@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 if (process.platform !== "win32") throw new Error("Windows is required");
@@ -23,9 +23,11 @@ const nativeSpawn = childProcess.spawn;
 const nativeSpawnSync = childProcess.spawnSync;
 const owned = [];
 const observedPids = new Set();
+let bashDirectory;
 childProcess.spawn = function (command, args, options) {
   const child = nativeSpawn.call(this, command, args, options);
   if (/bash\.exe$/iu.test(command)) {
+    bashDirectory = dirname(command);
     owned.push(child);
     log("spawn", { command, args, pid: child.pid, cwd: options?.cwd });
     child.on("error", (error) =>
@@ -46,6 +48,46 @@ childProcess.spawnSync = function (command, args, options) {
   if (!/taskkill\.exe$/iu.test(command))
     return nativeSpawnSync.call(this, command, args, options);
   snapshot();
+  const ps = nativeSpawnSync(join(bashDirectory, "ps.exe"), ["-l"], {
+    encoding: "utf8",
+    timeout: 5000,
+  });
+  log("msys-processes", {
+    status: ps.status,
+    stdout: ps.stdout,
+    stderr: ps.stderr,
+  });
+  const records = ps.stdout.split(/\r?\n/u).flatMap((line) => {
+    const match = line.match(
+      /^\s*(?:[SIO]\s+)?(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s/u,
+    );
+    return match
+      ? [
+          {
+            pid: Number(match[1]),
+            ppid: Number(match[2]),
+            pgid: Number(match[3]),
+            winpid: Number(match[4]),
+          },
+        ]
+      : [];
+  });
+  const root = records.find((entry) => entry.winpid === Number(args[1]));
+  if (root && root.pid === root.pgid) {
+    for (const entry of records)
+      if (entry.pgid === root.pgid) observedPids.add(entry.winpid);
+    const msysKill = nativeSpawnSync(
+      join(bashDirectory, "kill.exe"),
+      ["-KILL", "--", `-${root.pgid}`],
+      { encoding: "utf8", timeout: 5000 },
+    );
+    log("msys-kill", {
+      root,
+      status: msysKill.status,
+      stdout: msysKill.stdout,
+      stderr: msysKill.stderr,
+    });
+  }
   const result = nativeSpawnSync.call(this, command, args, {
     ...options,
     stdio: "pipe",
