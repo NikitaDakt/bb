@@ -18,6 +18,7 @@ on:
           - all
           - desktop
           - core
+          - plugin-build
           - providers
           - server
           - cli
@@ -87,11 +88,12 @@ jobs:
         timeout-minutes: 20
         env:
           TEST_GROUP: ${{ matrix.group }}
-          BB_TEST_TOOLCHAIN_FETCH: ${{ (matrix.group == 'core' || matrix.group == 'regressions') && '1' || '0' }}
+          BB_TEST_TOOLCHAIN_FETCH: ${{ (matrix.group == 'core' || matrix.group == 'plugin-build' || matrix.group == 'regressions') && '1' || '0' }}
         run: |
           $packages = @{
             desktop = '@bb/desktop'
             core = '@bb/domain @bb/process-utils @bb/config @bb/host-daemon-contract @bb/host-workspace @bb/host-watcher @bb/provider-bridge-protocol @bb/provider-bridge-acp @bb/plugin-build @bb/local-open-targets bb-app @bb/templates bb-plugin-bb-guide @bb/plugin-registry @get-bb/plugin-sdk bb-plugin-environment-git-worktree bb-plugin-environment-personal-workspace'
+            'plugin-build' = '@bb/plugin-build'
             providers = '@bb/agent-runtime @bb/provider-parity bb-plugin-provider-claude-code bb-plugin-provider-codex bb-plugin-provider-pi'
             server = '@bb/server'
             cli = '@bb/cli'

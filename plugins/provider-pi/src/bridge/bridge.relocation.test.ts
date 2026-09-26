@@ -32,6 +32,7 @@ it.each(["retained", "removed before relocation", "removed after relocation"])(
       initialize: true,
     });
     const target = realpathSync(harness.workspaceDir);
+    writeFileSync(join(target, "relocation-marker.txt"), "relocated workspace");
     const previous = join(target, "previous");
     mkdirSync(previous);
     mkdirSync(harness.sessionDir, { recursive: true });
@@ -127,9 +128,15 @@ it.each(["retained", "removed before relocation", "removed after relocation"])(
       onExit: () => undefined,
     });
     try {
-      const result = await child.request({ type: "bash", command: "pwd" });
+      const result = await child.request({
+        type: "bash",
+        command: "cat relocation-marker.txt",
+      });
       expect(result.success).toBe(true);
-      expect(result.data).toMatchObject({ output: `${target}\n`, exitCode: 0 });
+      expect(result.data).toMatchObject({
+        output: "relocated workspace",
+        exitCode: 0,
+      });
       const bytes = readFileSync(relocatedFile, "utf8");
       const forkHeader = z
         .object({ id: z.string(), cwd: z.string(), parentSession: z.string() })

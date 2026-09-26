@@ -161,12 +161,13 @@ describe("plugin server build", () => {
     );
 
     it("keeps bare and prefixed Node builtins external during runtime compilation", async () => {
+      const filePath = resolve(tmpdir(), "test");
       const dir = await fixture(`
 import { readFileSync } from "fs";
 import { basename } from "path";
 import { spawn } from "child_process";
 import { fileURLToPath } from "node:url";
-export default () => [typeof readFileSync, basename("/a/b"), typeof spawn, fileURLToPath("file:///tmp/test")];
+export default () => [typeof readFileSync, basename("/a/b"), typeof spawn, fileURLToPath(${JSON.stringify(pathToFileURL(filePath).href)})];
 `);
       const { jsPath } = await buildPluginServer(
         dir,
@@ -181,7 +182,7 @@ export default () => [typeof readFileSync, basename("/a/b"), typeof spawn, fileU
         "function",
         "b",
         "function",
-        "/tmp/test",
+        filePath,
       ]);
     });
 
@@ -525,31 +526,70 @@ export default () => ({
     expect(loaded.default()).toEqual({ owner: "plugin", locale: "en" });
   });
 
-  it("rejects static source imports outside the plugin tree", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "bb-plugin-server-boundary-"));
+  it.each(["relative", "absolute"] as const)(
+    "rejects %s static source imports outside the plugin tree",
+    async (kind) => {
+      const workDir = await mkdtemp(
+        join(tmpdir(), "bb-plugin-server-boundary-"),
+      );
+      tempDirs.push(workDir);
+      const dir = join(workDir, "plugin");
+      await mkdir(dir);
+      const serverEntry = join(dir, "server.ts");
+      const specifier =
+        kind === "relative" ? "../shared.js" : join(workDir, "shared.js");
+      await writeFile(join(workDir, "shared.js"), "export const value = 1;\n");
+      await writeFile(
+        serverEntry,
+        `import { value } from ${JSON.stringify(specifier)}; export default () => value;\n`,
+      );
+
+      await expect(
+        buildPluginServer(dir, "0.0.0-test", await testToolchain(), {
+          format: "cjs",
+          externalizeSourceOutsideRoot: true,
+          externalizeBareImports: true,
+          fallbackResolve: () => undefined,
+          validatedConfig: {
+            serverEntry,
+            packageName: "bb-plugin-boundary-fixture",
+            pluginVersion: "1.0.0",
+          },
+        }),
+      ).rejects.toThrow(
+        `server source import escapes the plugin directory: ${specifier}`,
+      );
+    },
+  );
+
+  it("loads dynamic source imports outside the plugin tree through file URLs", async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "bb-plugin-server-dynamic-"));
     tempDirs.push(workDir);
     const dir = join(workDir, "plugin");
     await mkdir(dir);
     const serverEntry = join(dir, "server.ts");
-    await writeFile(join(workDir, "shared.js"), "export const value = 1;\n");
+    await writeFile(join(workDir, "shared.mjs"), "export const value = 1;\n");
     await writeFile(
       serverEntry,
-      'import { value } from "../shared.js"; export default () => value;\n',
+      'export default async () => (await import("../shared.mjs")).value;\n',
     );
-
-    await expect(
-      buildPluginServer(dir, "0.0.0-test", await testToolchain(), {
+    const { jsPath } = await buildPluginServer(
+      dir,
+      "0.0.0-test",
+      await testToolchain(),
+      {
         format: "cjs",
         externalizeSourceOutsideRoot: true,
         validatedConfig: {
           serverEntry,
-          packageName: "bb-plugin-boundary-fixture",
+          packageName: "bb-plugin-dynamic-fixture",
           pluginVersion: "1.0.0",
         },
-      }),
-    ).rejects.toThrow(
-      "server source import escapes the plugin directory: ../shared.js",
+      },
     );
+    await expect(
+      createRequire(import.meta.url)(jsPath).default(),
+    ).resolves.toBe(1);
   });
 
   describe("SDK subpath imports", () => {

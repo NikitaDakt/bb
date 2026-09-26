@@ -7,7 +7,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { dirname, extname, join, relative, sep } from "node:path";
+import { dirname, extname, isAbsolute, join, relative, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { init as initModuleLexer, parse as parseModule } from "es-module-lexer";
 import { createPluginArtifactMeta } from "./plugin-artifact-meta.js";
@@ -43,7 +43,7 @@ const PLUGIN_RUNTIME_FALLBACK_RESOLVE_MARK = "bb-server-runtime-fallback";
 const PLUGIN_SOURCE_BOUNDARY_RESOLVE_MARK = "bb-server-source-boundary";
 const PLUGIN_BUNDLED_DEPENDENCY_MARK = "bb-server-bundled-dependency";
 const BARE_PACKAGE_FILTER = /^[^./]|^@[^/]+\/[^/]+/;
-const FILE_IMPORT_FILTER = /^(?:\.{1,2}\/|\/)/;
+const FILE_IMPORT_FILTER = /^(?:\.{1,2}[\\/]|[\\/]|[A-Za-z]:[\\/])/;
 
 interface PluginServerConfig {
   serverEntry: string;
@@ -98,8 +98,9 @@ export interface PluginServerBuildOptions {
 
 async function transformSourceModuleLocation(
   esbuild: typeof import("esbuild"),
-  path: string,
+  sourcePath: string,
 ): Promise<string> {
+  const path = await realpath(sourcePath);
   const sourceUrl = pathToFileURL(path).href;
   const transformed = await esbuild.transform(await readFile(path, "utf8"), {
     loader: loaderForSourcePath(path),
@@ -257,6 +258,8 @@ export async function buildPluginServer(
             );
             build.onResolve({ filter: BARE_PACKAGE_FILTER }, async (args) => {
               if (
+                args.kind === "entry-point" ||
+                FILE_IMPORT_FILTER.test(args.path) ||
                 args.pluginData === PLUGIN_RUNTIME_FALLBACK_RESOLVE_MARK ||
                 PLUGIN_SDK_SUBPATH_FILTER.test(args.path) ||
                 /^zod($|\/)/.test(args.path) ||
@@ -299,8 +302,12 @@ export async function buildPluginServer(
                 ) {
                   return undefined;
                 }
-                const importerFromRoot = relative(sourceRoot, args.importer);
+                const importerFromRoot = relative(
+                  sourceRoot,
+                  await realpath(args.importer),
+                );
                 if (
+                  isAbsolute(importerFromRoot) ||
                   importerFromRoot === ".." ||
                   importerFromRoot.startsWith(`..${sep}`) ||
                   importerFromRoot.split(sep).includes("node_modules")
@@ -316,12 +323,20 @@ export async function buildPluginServer(
                 if (resolved.errors.length > 0 || resolved.path === "") {
                   return undefined;
                 }
-                const fromRoot = relative(sourceRoot, resolved.path);
-                if (fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`)) {
-                  return { path: resolved.path };
+                const resolvedPath = await realpath(resolved.path);
+                const fromRoot = relative(sourceRoot, resolvedPath);
+                if (
+                  !isAbsolute(fromRoot) &&
+                  fromRoot !== ".." &&
+                  !fromRoot.startsWith(`..${sep}`)
+                ) {
+                  return { path: resolvedPath };
                 }
                 if (args.kind === "dynamic-import") {
-                  return { path: resolved.path, external: true };
+                  return {
+                    path: pathToFileURL(resolvedPath).href,
+                    external: true,
+                  };
                 }
                 return {
                   errors: [
