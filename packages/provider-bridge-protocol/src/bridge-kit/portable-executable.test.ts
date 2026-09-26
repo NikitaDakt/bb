@@ -1,6 +1,13 @@
 import { EventEmitter } from "node:events";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import type { ChildProcess, SpawnOptions } from "node:child_process";
+import {
+  spawn,
+  type ChildProcess,
+  type SpawnOptions,
+} from "node:child_process";
 import { describe, expect, it } from "vitest";
 import {
   isMissingPortableExecutable,
@@ -319,6 +326,72 @@ describe("runPortableCommandCapture", () => {
     expect(failure).toBeInstanceOf(PortableCommandError);
     expect((failure as PortableCommandError).message).toContain("output limit");
   });
+
+  it.runIf(process.platform === "win32").each(["timeout", "output limit"])(
+    "stops the Windows shim's child after %s while preserving another process",
+    async (failureMode) => {
+      const dir = await mkdtemp(join(tmpdir(), "bb probe Кириллица & [shim]-"));
+      const pidFile = join(dir, "child.pid");
+      const shim = join(dir, "probe.cmd");
+      const unrelated = spawn(
+        process.execPath,
+        ["-e", "setInterval(() => {}, 1000)"],
+        {
+          stdio: "ignore",
+          windowsHide: true,
+        },
+      );
+      const isAlive = (pid: number): boolean => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      let probePid: number | undefined;
+      try {
+        await writeFile(
+          shim,
+          '@"%BB_CAPTURE_TEST_NODE%" "%~dp0probe.mjs" %*\r\n',
+        );
+        await writeFile(
+          join(dir, "probe.mjs"),
+          `
+          import { writeFileSync } from "node:fs";
+          writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+          if (process.argv[2] === "overflow") process.stdout.write("x".repeat(2 * 1024 * 1024));
+          setInterval(() => {}, 1000);
+        `,
+        );
+        const failure = await runPortableCommandCapture({
+          command: shim,
+          args: [failureMode === "timeout" ? "wait" : "overflow"],
+          env: { ...process.env, BB_CAPTURE_TEST_NODE: process.execPath },
+          timeoutMs: failureMode === "timeout" ? 3000 : 10_000,
+        }).then(
+          () => null,
+          (error: unknown) => error,
+        );
+        probePid = Number(await readFile(pidFile, "utf8"));
+        expect(Number.isInteger(probePid) && probePid > 0).toBe(true);
+        expect(failure).toBeInstanceOf(PortableCommandError);
+        if (!(failure instanceof PortableCommandError)) throw failure;
+        if (failureMode === "timeout") expect(failure.timedOut).toBe(true);
+        else expect(failure.message).toContain("output limit");
+        await expect
+          .poll(() => isAlive(probePid!), { timeout: 5000 })
+          .toBe(false);
+        expect(unrelated.pid).toBeDefined();
+        expect(isAlive(unrelated.pid!)).toBe(true);
+      } finally {
+        if (probePid !== undefined && isAlive(probePid)) process.kill(probePid);
+        unrelated.kill();
+        await rm(dir, { recursive: true, force: true });
+      }
+    },
+    20_000,
+  );
 
   it("routes the win32 capture through the injected spawn with shell disabled", async () => {
     const { calls, spawned, fn } = recordingSpawn();

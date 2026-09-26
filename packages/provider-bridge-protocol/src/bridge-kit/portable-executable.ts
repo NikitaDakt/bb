@@ -5,6 +5,7 @@ import {
 } from "node:child_process";
 import path from "node:path";
 import {
+  killProcessGroup,
   spawnPortableOutputProcess,
   spawnPortablePipedProcess,
 } from "@bb/process-utils";
@@ -219,7 +220,13 @@ export function runPortableCommandCapture(
       settled = true;
       clearTimeout(timeout);
       try {
-        child.kill("SIGTERM");
+        if (platform === "win32") {
+          if (child.exitCode === null && child.signalCode === null) {
+            killProcessGroup({ child, signal: "SIGTERM", platform });
+          }
+        } else {
+          child.kill("SIGTERM");
+        }
       } catch {}
       rejectCapture(error);
     };
