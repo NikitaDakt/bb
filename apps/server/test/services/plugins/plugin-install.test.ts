@@ -33,6 +33,7 @@ import { ROOT_PLUGIN_SOURCE_SELECTION } from "@bb/server-contract";
 import type { Logger } from "@bb/logger";
 import { scaffoldPlugin } from "@bb/templates/plugin-scaffold";
 import { PLUGIN_SDK_MAJOR, PLUGIN_SDK_VERSION } from "@bb/domain";
+import { resolveBundledNpmCli } from "@bb/plugin-build";
 import { validatePluginArtifactMeta } from "../../../src/services/plugins/app-bundle.js";
 import {
   gitArtifactCacheDir,
@@ -92,10 +93,7 @@ async function hasBinary(command: string): Promise<boolean> {
   }
 }
 
-const [hasGit, hasNpm] = await Promise.all([
-  hasBinary("git"),
-  hasBinary("npm"),
-]);
+const hasGit = await hasBinary("git");
 
 async function writePluginFixture(
   rootDir: string,
@@ -1108,16 +1106,14 @@ describe("plugin install flows", () => {
       await stat(join(entry.rootDir, "dist", "server.meta.json"));
     });
 
-    it.runIf(hasNpm)(
-      "builds a Git host entry without installing the SDK at runtime",
-      async () => {
-        const repoDir = join(workDir, "repo-host-with-dev-sdk-omitted");
-        await writePluginFixture(repoDir, {
-          name: "bb-plugin-host-with-dev-sdk-omitted",
-          devDependencies: {
-            "@get-bb/plugin-sdk": "file:./sdk-type-fixture",
-          },
-          hostSource: `
+    it("builds a Git host entry without installing the SDK at runtime", async () => {
+      const repoDir = join(workDir, "repo-host-with-dev-sdk-omitted");
+      await writePluginFixture(repoDir, {
+        name: "bb-plugin-host-with-dev-sdk-omitted",
+        devDependencies: {
+          "@get-bb/plugin-sdk": "file:./sdk-type-fixture",
+        },
+        hostSource: `
             import { defineRpcContract } from "@get-bb/plugin-sdk";
             import { experimental_defineHostEntry } from "@get-bb/plugin-sdk/host";
             const schema = { "~standard": { validate(value) { return { value }; } } };
@@ -1127,35 +1123,34 @@ describe("plugin install flows", () => {
               handlers: { echo: (input) => input },
             });
           `,
-        });
-        await mkdir(join(repoDir, "sdk-type-fixture"), { recursive: true });
-        await writeFile(
-          join(repoDir, "sdk-type-fixture", "package.json"),
-          JSON.stringify({
-            name: "@get-bb/plugin-sdk",
-            version: "0.0.0-test",
-            private: true,
-          }),
-        );
-        await initGitRepo(repoDir);
-        await commitAll(repoDir, "init");
+      });
+      await mkdir(join(repoDir, "sdk-type-fixture"), { recursive: true });
+      await writeFile(
+        join(repoDir, "sdk-type-fixture", "package.json"),
+        JSON.stringify({
+          name: "@get-bb/plugin-sdk",
+          version: "0.0.0-test",
+          private: true,
+        }),
+      );
+      await initGitRepo(repoDir);
+      await commitAll(repoDir, "init");
 
-        const entry = await service.install(`git:${repoDir}@main`, {
-          kind: "root",
-        });
+      const entry = await service.install(`git:${repoDir}@main`, {
+        kind: "root",
+      });
 
-        expect(entry.status).toBe("running");
-        const bundle = await readFile(
-          join(entry.rootDir, "dist", "host.js"),
-          "utf8",
-        );
-        expect(bundle).not.toMatch(/from\s+["']@get-bb\/plugin-sdk/u);
-        await stat(join(entry.rootDir, "dist", "host.meta.json"));
-        await expect(
-          stat(join(entry.rootDir, "node_modules", "@get-bb", "plugin-sdk")),
-        ).rejects.toMatchObject({ code: "ENOENT" });
-      },
-    );
+      expect(entry.status).toBe("running");
+      const bundle = await readFile(
+        join(entry.rootDir, "dist", "host.js"),
+        "utf8",
+      );
+      expect(bundle).not.toMatch(/from\s+["']@get-bb\/plugin-sdk/u);
+      await stat(join(entry.rootDir, "dist", "host.meta.json"));
+      await expect(
+        stat(join(entry.rootDir, "node_modules", "@get-bb", "plugin-sdk")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    });
 
     it("restores a target moved aside by an interrupted promotion", async () => {
       const repoDir = join(workDir, "repo-interrupted-promotion");
@@ -1226,57 +1221,54 @@ describe("plugin install flows", () => {
       await expect(stat(join(entry.rootDir, ".npmrc"))).rejects.toThrowError();
     });
 
-    it.runIf(hasNpm)(
-      "inlines a git plugin's third-party dependency into its bundles",
-      async () => {
-        const depDir = join(workDir, "dep-package");
-        await mkdir(depDir, { recursive: true });
-        await writeFile(
-          join(depDir, "package.json"),
-          JSON.stringify({
-            name: "bb-test-greeter",
-            version: "1.0.0",
-            main: "index.js",
-          }),
-        );
-        await writeFile(
-          join(depDir, "index.js"),
-          "module.exports.greet = () => 'hello from the dependency';",
-        );
+    it("inlines a git plugin's third-party dependency into its bundles", async () => {
+      const depDir = join(workDir, "dep-package");
+      await mkdir(depDir, { recursive: true });
+      await writeFile(
+        join(depDir, "package.json"),
+        JSON.stringify({
+          name: "bb-test-greeter",
+          version: "1.0.0",
+          main: "index.js",
+        }),
+      );
+      await writeFile(
+        join(depDir, "index.js"),
+        "module.exports.greet = () => 'hello from the dependency';",
+      );
 
-        const repoDir = join(workDir, "repo-with-deps");
-        await writePluginFixture(repoDir, { name: "bb-plugin-withdeps" });
-        const manifestPath = join(repoDir, "package.json");
-        const manifest: unknown = JSON.parse(
-          await readFile(manifestPath, "utf8"),
-        );
-        await writeFile(
-          manifestPath,
-          JSON.stringify({
-            ...(manifest as Record<string, unknown>),
-            dependencies: { "bb-test-greeter": `file:${depDir}` },
-          }),
-        );
-        await writeFile(
-          join(repoDir, "server.ts"),
-          `import { greet } from "bb-test-greeter";\n` +
-            `export default function plugin(bb: any) { bb.log.info(greet()); }`,
-        );
-        await initGitRepo(repoDir);
-        await commitAll(repoDir, "init");
+      const repoDir = join(workDir, "repo-with-deps");
+      await writePluginFixture(repoDir, { name: "bb-plugin-withdeps" });
+      const manifestPath = join(repoDir, "package.json");
+      const manifest: unknown = JSON.parse(
+        await readFile(manifestPath, "utf8"),
+      );
+      await writeFile(
+        manifestPath,
+        JSON.stringify({
+          ...(manifest as Record<string, unknown>),
+          dependencies: { "bb-test-greeter": `file:${depDir}` },
+        }),
+      );
+      await writeFile(
+        join(repoDir, "server.ts"),
+        `import { greet } from "bb-test-greeter";\n` +
+          `export default function plugin(bb: any) { bb.log.info(greet()); }`,
+      );
+      await initGitRepo(repoDir);
+      await commitAll(repoDir, "init");
 
-        const entry = await service.install(`git:${repoDir}@main`, {
-          kind: "root",
-        });
-        expect(entry.status).toBe("running");
-        const bundle = await readFile(
-          join(entry.rootDir, "dist", "server.js"),
-          "utf8",
-        );
-        expect(bundle).toContain("hello from the dependency");
-        await stat(join(entry.rootDir, "node_modules"));
-      },
-    );
+      const entry = await service.install(`git:${repoDir}@main`, {
+        kind: "root",
+      });
+      expect(entry.status).toBe("running");
+      const bundle = await readFile(
+        join(entry.rootDir, "dist", "server.js"),
+        "utf8",
+      );
+      expect(bundle).toContain("hello from the dependency");
+      await stat(join(entry.rootDir, "node_modules"));
+    });
   });
 
   describe.skipIf(!hasGit)(
@@ -1667,7 +1659,7 @@ describe("plugin install flows", () => {
     });
   });
 
-  describe.skipIf(!hasNpm)("npm sources", () => {
+  describe("npm sources", () => {
     it(
       "installs a scoped package into the immutable cache and retains it on removal",
       { timeout: 120_000 },
@@ -1678,9 +1670,11 @@ describe("plugin install flows", () => {
         await writePluginFixture(fixtureDir, { name, version });
         const packDir = join(workDir, "npm-pack");
         await mkdir(packDir, { recursive: true });
-        await run("npm", ["pack", "--pack-destination", packDir], {
-          cwd: fixtureDir,
-        });
+        await run(
+          process.execPath,
+          [resolveBundledNpmCli(), "pack", "--pack-destination", packDir],
+          { cwd: fixtureDir },
+        );
         const [tarballName] = await readdir(packDir);
         if (tarballName === undefined)
           throw new Error("npm pack produced no tarball");
