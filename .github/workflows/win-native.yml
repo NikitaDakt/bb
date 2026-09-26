@@ -9,6 +9,19 @@ on:
         required: false
         type: boolean
         default: true
+      test_group:
+        description: Run all checks or diagnose one Windows group
+        required: false
+        type: choice
+        default: all
+        options:
+          - all
+          - desktop
+          - core
+          - providers
+          - server
+          - cli
+          - daemon
 
 permissions:
   contents: read
@@ -32,29 +45,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        include:
-          - group: desktop
-            filters: --filter=@bb/desktop
-          - group: core
-            filters: >-
-              --filter=@bb/domain --filter=@bb/process-utils --filter=@bb/config
-              --filter=@bb/host-daemon-contract --filter=@bb/host-workspace --filter=@bb/host-watcher
-              --filter=@bb/provider-bridge-protocol --filter=@bb/provider-bridge-acp
-              --filter=@bb/plugin-build --filter=@bb/local-open-targets --filter=bb-app
-              --filter=@bb/templates --filter=bb-plugin-bb-guide --filter=@bb/plugin-registry
-              --filter=@get-bb/plugin-sdk --filter=bb-plugin-environment-git-worktree
-              --filter=bb-plugin-environment-personal-workspace
-          - group: providers
-            filters: >-
-              --filter=@bb/agent-runtime --filter=@bb/provider-parity
-              --filter=bb-plugin-provider-claude-code --filter=bb-plugin-provider-codex
-              --filter=bb-plugin-provider-pi
-          - group: server
-            filters: --filter=@bb/server
-          - group: cli
-            filters: --filter=@bb/cli
-          - group: daemon
-            filters: --filter=@bb/host-daemon
+        group: ${{ fromJSON(inputs.test_group && inputs.test_group != 'all' && format('["{0}"]', inputs.test_group) || '["desktop","core","providers","server","cli","daemon"]') }}
     defaults:
       run:
         shell: pwsh
@@ -92,9 +83,18 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         timeout-minutes: 20
         env:
-          TEST_FILTERS: ${{ matrix.filters }}
+          TEST_GROUP: ${{ matrix.group }}
         run: |
-          $testArguments = @('exec', 'turbo', 'run', 'test') + ($env:TEST_FILTERS -split '\s+') + @(
+          $packages = @{
+            desktop = '@bb/desktop'
+            core = '@bb/domain @bb/process-utils @bb/config @bb/host-daemon-contract @bb/host-workspace @bb/host-watcher @bb/provider-bridge-protocol @bb/provider-bridge-acp @bb/plugin-build @bb/local-open-targets bb-app @bb/templates bb-plugin-bb-guide @bb/plugin-registry @get-bb/plugin-sdk bb-plugin-environment-git-worktree bb-plugin-environment-personal-workspace'
+            providers = '@bb/agent-runtime @bb/provider-parity bb-plugin-provider-claude-code bb-plugin-provider-codex bb-plugin-provider-pi'
+            server = '@bb/server'
+            cli = '@bb/cli'
+            daemon = '@bb/host-daemon'
+          }
+          $filters = @($packages[$env:TEST_GROUP] -split '\s+' | ForEach-Object { "--filter=$_" })
+          $testArguments = @('exec', 'turbo', 'run', 'test') + $filters + @(
             '--concurrency=1', '--env-mode=loose', '--continue=always', '--log-order=stream',
             '--', '--maxWorkers=1', '--maxConcurrency=2', '--reporter=default', '--reporter=json', '--outputFile=.rt/windows-tests.json'
           )
@@ -127,12 +127,15 @@ jobs:
         run: pnpm --filter @bb/desktop desktop:version-feed
       - name: Packaged app and native dependencies
         if: ${{ !cancelled() && steps.installer.outcome == 'success' }}
+        timeout-minutes: 5
         run: node apps/desktop/scripts/smoke-packaged-app.mjs
       - name: Packaged process cleanup
         if: ${{ !cancelled() && steps.installer.outcome == 'success' }}
+        timeout-minutes: 5
         run: node apps/desktop/scripts/smoke-windows-processes.mjs --evidence-dir .rt/windows-native/unpacked
       - name: Installed app lifecycle
         if: ${{ !cancelled() && steps.installer.outcome == 'success' }}
+        timeout-minutes: 10
         run: |
           $installer = @(Get-ChildItem apps/desktop/release/*Setup*.exe)
           if ($installer.Count -ne 1) { throw 'Expected one NSIS installer' }

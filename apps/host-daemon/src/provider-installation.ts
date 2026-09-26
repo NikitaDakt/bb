@@ -57,6 +57,7 @@ function createPtyProviderInstallationProcessSpawner(): ProviderInstallationProc
         env: args.env ?? process.env,
         name: "xterm-256color",
         rows: 30,
+        useConptyDll: process.platform === "win32",
       });
       pty.onData((data) => stdout.write(data));
       pty.onExit(() => {
@@ -67,7 +68,7 @@ function createPtyProviderInstallationProcessSpawner(): ProviderInstallationProc
         stdout,
         stderr,
         kill(signal) {
-          pty.kill(signal);
+          pty.kill(process.platform === "win32" ? undefined : signal);
           return true;
         },
         onError(listener) {

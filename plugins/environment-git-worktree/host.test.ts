@@ -46,7 +46,9 @@ async function createSourceRepository(repositoryName = "repo"): Promise<{
   sourcePath: string;
   dataDir: string;
 }> {
-  const root = await mkdtemp(join(tmpdir(), "bb-worktree-plugin-"));
+  const root = await realpath(
+    await mkdtemp(join(tmpdir(), "bb-worktree-plugin-")),
+  );
   temporaryRoots.push(root);
   const sourcePath = join(root, repositoryName);
   const dataDir = join(root, "plugin-data");
@@ -259,9 +261,16 @@ describe("worktree host entry", () => {
   );
 
   it("creates a bounded worktree path for a long repository name", async () => {
-    const repositoryName = "repository".repeat(24);
-    const { sourcePath, dataDir } =
+    const repositoryName =
+      process.platform === "win32"
+        ? "repository".repeat(14)
+        : "repository".repeat(24);
+    const { sourcePath, dataDir: fixtureDataDir } =
       await createSourceRepository(repositoryName);
+    const dataDir =
+      process.platform === "win32"
+        ? join(fixtureDataDir, "nested".repeat(10))
+        : fixtureDataDir;
     const harness = createHarness(dataDir);
     const result = await harness.experimental_call(
       "create",
@@ -274,7 +283,14 @@ describe("worktree host entry", () => {
     );
     expect(result.status).toBe("created");
     if (result.status !== "created") throw new Error(result.message);
-    expect(Buffer.byteLength(basename(result.path), "utf8")).toBe(200);
+    if (process.platform === "win32") {
+      expect(result.path.length).toBeLessThan(260);
+      expect(
+        Buffer.byteLength(basename(result.path), "utf8"),
+      ).toBeLessThanOrEqual(200);
+    } else {
+      expect(Buffer.byteLength(basename(result.path), "utf8")).toBe(200);
+    }
     expect(basename(result.path)).toMatch(/-[a-f0-9]{16}$/u);
     expect(existsSync(join(result.path, "README.md"))).toBe(true);
     await harness.experimental_dispose();

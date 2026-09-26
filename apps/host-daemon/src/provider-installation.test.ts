@@ -1,4 +1,8 @@
 import { PassThrough } from "node:stream";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { killProcessGroup } from "@bb/process-utils";
 import { describe, expect, it, vi } from "vitest";
 import {
   ProviderInstallationInProgressError,
@@ -45,6 +49,68 @@ async function readEvents(stream: ReadableStream<Uint8Array>) {
 }
 
 describe("streamProviderInstallation", () => {
+  it("cancels a real installation terminal and its child processes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "bb-install-cancel-"));
+    const pidFile = join(directory, "pids.json");
+    const stream = streamProviderInstallation({
+      providerId: "real-cancellation",
+      plan: {
+        command: process.execPath,
+        args: [
+          "-e",
+          `const child = require("node:child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "inherit" });
+           require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, JSON.stringify([process.pid, child.pid]));
+           setInterval(() => {}, 1000);`,
+        ],
+        displayCommand: "test installation cancellation",
+      },
+    });
+    let pids: number[] = [];
+    try {
+      await vi.waitFor(
+        async () => {
+          const value: unknown = JSON.parse(await readFile(pidFile, "utf8"));
+          if (
+            !Array.isArray(value) ||
+            value.length !== 2 ||
+            !value.every((pid) => Number.isSafeInteger(pid) && pid > 0)
+          )
+            throw new Error("Expected two installation process IDs");
+          pids = value;
+        },
+        { timeout: 10_000 },
+      );
+      for (const pid of pids) expect(() => process.kill(pid, 0)).not.toThrow();
+      await expect(stream.cancel()).resolves.toBeUndefined();
+      await vi.waitFor(
+        () => {
+          for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
+        },
+        { timeout: 10_000 },
+      );
+    } finally {
+      await stream.cancel().catch(() => {});
+      for (const pid of pids) {
+        try {
+          killProcessGroup({
+            child: { pid, kill: (signal) => process.kill(pid, signal) },
+            signal: "SIGKILL",
+          });
+        } catch (error) {
+          if (
+            !(
+              error instanceof Error &&
+              "code" in error &&
+              error.code === "ESRCH"
+            )
+          )
+            throw error;
+        }
+      }
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("executes the provider plan and streams process output", async () => {
     const process = fakeProcess();
     const spawner: ProviderInstallationProcessSpawner = {

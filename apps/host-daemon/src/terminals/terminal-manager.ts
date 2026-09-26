@@ -241,6 +241,7 @@ const nodePtyAdapter: TerminalPtyAdapter = {
       env: args.env,
       name: "xterm-256color",
       rows: args.rows,
+      useConptyDll: process.platform === "win32",
     });
     return {
       get pid() {

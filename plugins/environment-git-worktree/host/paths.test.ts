@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import { WorkspaceError } from "bb-environment-provider-host/git";
 import { describe, expect, it } from "vitest";
 import {
@@ -81,6 +81,51 @@ describe("deriveRepoDirName", () => {
 });
 
 describe("managed worktree paths", () => {
+  it("preserves a short Windows repository name", () => {
+    const args = {
+      dataDir: "C:\\bb",
+      pathKey: "thread",
+      sourcePath: "C:\\src\\repo",
+      platform: "win32" as const,
+    };
+    expect(resolveWorktreeTargetPath(args)).toBe(
+      "C:\\bb\\worktrees\\thread\\repo",
+    );
+  });
+
+  it("bounds the complete Windows Git working directory and keeps names distinct", () => {
+    const args = {
+      dataDir: `C:\\${"parent\\".repeat(20)}`,
+      pathKey: "thread",
+      sourcePath: `C:\\src\\${"repository".repeat(20)}`,
+      platform: "win32" as const,
+    };
+    const target = resolveWorktreeTargetPath(args);
+    expect(target.length).toBeLessThan(260);
+    expect(win32.basename(target)).toMatch(/-[a-f0-9]{16}$/u);
+    expect(win32.dirname(target)).toBe(
+      win32.join(args.dataDir, "worktrees", "thread"),
+    );
+    expect(
+      resolveWorktreeTargetPath({
+        ...args,
+        sourcePath: `${args.sourcePath}-other`,
+      }),
+    ).not.toBe(target);
+  });
+
+  it("rejects a Windows data directory without room for a managed worktree", () => {
+    const args = {
+      dataDir: `C:\\${"parent\\".repeat(36)}`,
+      pathKey: "thread",
+      sourcePath: "C:\\src\\repo",
+      platform: "win32" as const,
+    };
+    expect(() => resolveWorktreeTargetPath(args)).toThrow(
+      /shorter.*data directory/iu,
+    );
+  });
+
   it("keeps derived targets inside their validated attempt root", () => {
     expect(
       resolveWorktreeTargetPath({
