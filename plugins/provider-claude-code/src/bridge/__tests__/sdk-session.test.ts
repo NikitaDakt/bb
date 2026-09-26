@@ -119,7 +119,7 @@ describe("SdkSession", () => {
     const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
     session.start();
 
-    await session.setModel("claude-sonnet-5");
+    await session.setModel("claude-opus-5");
     await session.applyMutableSettings({
       effort: "max",
       settings: {
@@ -127,15 +127,17 @@ describe("SdkSession", () => {
         enableWorkflows: true,
         effortLevel: "max",
         ultracode: false,
+        fastMode: true,
       },
     });
 
-    expect(mockQueryInstance.setModel).toHaveBeenCalledWith("claude-sonnet-5");
+    expect(mockQueryInstance.setModel).toHaveBeenCalledWith("claude-opus-5");
     expect(mockQueryInstance.applyFlagSettings).toHaveBeenCalledWith({
       autoMemoryEnabled: false,
       enableWorkflows: true,
       effortLevel: "max",
       ultracode: false,
+      fastMode: true,
     });
     session.stop();
   });
