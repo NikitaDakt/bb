@@ -300,7 +300,7 @@ async function stopPackagedApp(child) {
     spawnSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
       stdio: "ignore",
     });
-    await waitForProcessExit(child, exitTimeoutMs);
+    await waitForChildExit(child, exitTimeoutMs);
     return;
   }
 
@@ -417,9 +417,12 @@ async function smokePackagedApp() {
 
     console.log(`Packaged desktop smoke passed: ${appBinary}`);
   } finally {
-    await stopPackagedApp(child);
-    await smokeServer.close();
-    await rm(smokeRoot, { force: true, recursive: true });
+    try {
+      await stopPackagedApp(child);
+    } finally {
+      await smokeServer.close();
+      await rm(smokeRoot, { force: true, recursive: true });
+    }
   }
 }
 

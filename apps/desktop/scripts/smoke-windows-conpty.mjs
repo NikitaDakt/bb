@@ -110,6 +110,7 @@ function spawnShell(nodePty) {
     env: process.env,
     name: "windows-powershell",
     rows: 30,
+    useConptyDll: true,
   });
   let output = "";
   let exited = false;
@@ -199,7 +200,7 @@ async function smokeWindowsConpty() {
   }
   const nodePtyVersion = nodePtyRequire("node-pty/package.json").version;
   console.log(
-    `Windows ConPTY smoke: node-pty ${nodePtyVersion} spawning ${shellFile} ${shellArgs.join(" ")}`,
+    `Windows ConPTY smoke: node-pty ${nodePtyVersion}, bundled ConPTY, spawning ${shellFile} ${shellArgs.join(" ")}`,
   );
 
   await check("spawn-echo", async () => {
@@ -244,6 +245,10 @@ async function smokeWindowsConpty() {
         stepTimeoutMs,
       );
       if (match === null) {
+        session.pty.write(
+          "Write-Output ('BB_' + 'CONPTY_CONFIG PS=' + $PSVersionTable.PSVersion + ' ReadLine=' + (Get-Module PSReadLine).Version + ' Input=' + [Console]::InputEncoding.WebName + ' Output=' + [Console]::OutputEncoding.WebName)\r",
+        );
+        await waitForPattern(session.getOutput, /BB_CONPTY_CONFIG PS=/, 5_000);
         const output = session.getOutput();
         const sawEnye = output.includes("diseño");
         throw new Error(

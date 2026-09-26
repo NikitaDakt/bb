@@ -32,23 +32,23 @@ function sourcePathBasename(sourcePath: string): string {
   return pathApi.basename(sourcePath.replace(trailingSeparators, ""));
 }
 
-function isSafeRepoDirName(candidate: string): boolean {
+function isSafeRepoDirName(candidate: string, maxBytes: number): boolean {
   return (
     candidate !== "." &&
     candidate !== ".." &&
     REPO_DIR_NAME_PATTERN.test(candidate) &&
     !candidate.endsWith(".") &&
     !WINDOWS_RESERVED_NAME_PATTERN.test(candidate) &&
-    Buffer.byteLength(candidate, "utf8") <= MAX_REPO_DIR_NAME_BYTES
+    Buffer.byteLength(candidate, "utf8") <= maxBytes
   );
 }
 
-function slugRepoDirName(candidate: string): string {
+function slugRepoDirName(candidate: string, maxBytes: number): string {
   const suffix = createHash("sha256")
     .update(candidate, "utf8")
     .digest("hex")
     .slice(0, REPO_DIR_HASH_LENGTH);
-  const readableLimit = MAX_REPO_DIR_NAME_BYTES - suffix.length - 1;
+  const readableLimit = maxBytes - suffix.length - 1;
   const normalizedReadable = candidate
     .normalize("NFKD")
     .replace(/\p{Mark}+/gu, "")
@@ -61,10 +61,13 @@ function slugRepoDirName(candidate: string): string {
   )
     .slice(0, readableLimit)
     .replace(/[._-]+$/u, "");
-  return `${readable || "repo"}-${suffix}`;
+  return `${readable || "repo".slice(0, readableLimit)}-${suffix}`;
 }
 
-export function deriveRepoDirName(sourcePath: string): string {
+export function deriveRepoDirName(
+  sourcePath: string,
+  maxBytes = MAX_REPO_DIR_NAME_BYTES,
+): string {
   const basename = sourcePathBasename(sourcePath);
   const candidate = basename.endsWith(".git")
     ? basename.slice(0, -".git".length)
@@ -73,7 +76,9 @@ export function deriveRepoDirName(sourcePath: string): string {
   if (!candidate || candidate === "." || candidate === "..") {
     throw invalidSourcePath(sourcePath);
   }
-  return isSafeRepoDirName(candidate) ? candidate : slugRepoDirName(candidate);
+  return isSafeRepoDirName(candidate, maxBytes)
+    ? candidate
+    : slugRepoDirName(candidate, maxBytes);
 }
 
 export function resolveWorktreesRoot(dataDir: string): string {
@@ -104,11 +109,25 @@ export function resolveWorktreeTargetPath(args: {
   dataDir: string;
   pathKey: string;
   sourcePath: string;
+  platform?: NodeJS.Platform;
 }): string {
-  return path.join(
-    resolveWorktreeAttemptRoot(args),
-    deriveRepoDirName(args.sourcePath),
-  );
+  const root = resolveWorktreeAttemptRoot(args);
+  const pathApi =
+    (args.platform ?? process.platform) === "win32" ? path.win32 : path;
+  const maxBytes =
+    pathApi === path.win32
+      ? Math.min(
+          MAX_REPO_DIR_NAME_BYTES,
+          259 - pathApi.resolve(root).length - 1,
+        )
+      : MAX_REPO_DIR_NAME_BYTES;
+  if (maxBytes < REPO_DIR_HASH_LENGTH + 2) {
+    throw new WorkspaceError(
+      "invalid_source_path",
+      "The Windows Git worktree path is too long; choose a shorter bb data directory",
+    );
+  }
+  return pathApi.join(root, deriveRepoDirName(args.sourcePath, maxBytes));
 }
 
 export function resolveWorktreeChildPath(args: {

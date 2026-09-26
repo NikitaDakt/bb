@@ -435,6 +435,114 @@ describe.runIf(process.platform === "win32")(
       expect(() => process.kill(daemon.pid, 0)).toThrow();
     }, 120_000);
 
+    it.each(["task", "run-key"])(
+      "manages a real Windows %s registration through its complete lifecycle",
+      async (kind) => {
+        const fixture = createFixture();
+        const taskName = `bb-host-daemon-${fixture.bootstrap.hostId}`;
+        const runKey =
+          "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+        const serviceEnv = {
+          BB_INSTALL_SKIP_SERVICE: "0",
+          BB_INSTALL_FORCE_RUNKEY: kind === "run-key" ? "1" : "0",
+        };
+        const powershell = (script: string) =>
+          spawnSync(POWERSHELL_BIN, ["-NoProfile", "-Command", script], {
+            encoding: "utf8",
+            timeout: 20_000,
+            windowsHide: true,
+          });
+        const registration = () => {
+          const result = powershell(
+            `$task = Get-ScheduledTask -TaskName ${quotePowerShell(taskName)} -ErrorAction SilentlyContinue; ` +
+              `$run = Get-ItemProperty -LiteralPath ${quotePowerShell(runKey)} -Name ${quotePowerShell(taskName)} -ErrorAction SilentlyContinue; ` +
+              `@{ task = $null -ne $task; command = [string]$task.Actions.Arguments; run = [string]$run.${quotePowerShell(taskName)} } | ConvertTo-Json -Compress`,
+          );
+          expect(result.status, result.stderr).toBe(0);
+          return JSON.parse(result.stdout);
+        };
+        const daemonPid = () =>
+          JSON.parse(
+            readFileSync(join(fixture.dataDir, "daemon-start.json"), "utf8"),
+          ).pid;
+        try {
+          const first = runInstaller(fixture, serviceEnv);
+          expect(first.status, first.stdout + first.stderr).toBe(0);
+          const canonicalDir = realpathSync.native(fixture.dataDir);
+          const wrapper = join(canonicalDir, `${taskName}.ps1`);
+          const state = registration();
+          expect(state.task).toBe(kind === "task");
+          expect(state.run).toEqual(
+            kind === "task" ? "" : expect.stringContaining("powershell.exe"),
+          );
+          const command = kind === "task" ? state.command : state.run;
+          const encoded = /-EncodedCommand\s+(\S+)/iu.exec(command)?.[1];
+          expect(encoded).toBeDefined();
+          expect(Buffer.from(encoded!, "base64").toString("utf16le")).toContain(
+            quotePowerShell(wrapper),
+          );
+          const identity = readFileSync(
+            join(canonicalDir, "auth.json"),
+            "utf8",
+          );
+          const port = readFileSync(
+            join(canonicalDir, "host-daemon-port"),
+            "utf8",
+          );
+          let previousPid = daemonPid();
+          const second = runInstaller(fixture, serviceEnv);
+          expect(second.status, second.stdout + second.stderr).toBe(0);
+          expect(() => process.kill(previousPid, 0)).toThrow();
+          expect(registration()).toEqual(state);
+          expect(
+            readFileSync(join(canonicalDir, "host-daemon-port"), "utf8"),
+          ).toBe(port);
+          expect(
+            readFileSync(fixture.npmLog, "utf8").trim().split("\n"),
+          ).toHaveLength(1);
+
+          for (const action of ["Stop", "Start", "Restart", "Uninstall"]) {
+            previousPid = daemonPid();
+            const result = runInstaller(
+              fixture,
+              {},
+              [`-${action}`, "-DataDir", fixture.dataDir],
+              join(fixture.dataDir, "install-machine.ps1"),
+            );
+            expect(result.status, result.stdout + result.stderr).toBe(0);
+            expect(readFileSync(join(canonicalDir, "auth.json"), "utf8")).toBe(
+              identity,
+            );
+            if (action !== "Start")
+              expect(() => process.kill(previousPid, 0)).toThrow();
+            if (action === "Start" || action === "Restart") {
+              expect(daemonPid()).not.toBe(previousPid);
+              const response = await fetch(
+                `http://127.0.0.1:${port.trim()}/status`,
+                {
+                  signal: AbortSignal.timeout(5_000),
+                },
+              );
+              expect(response.ok).toBe(true);
+              expect(await response.json()).toMatchObject({
+                hostId: fixture.bootstrap.hostId,
+                connected: true,
+              });
+            }
+          }
+          expect(registration()).toEqual({ task: false, command: "", run: "" });
+          expect(existsSync(wrapper)).toBe(false);
+        } finally {
+          const cleanup = powershell(
+            `Get-ScheduledTask -TaskName ${quotePowerShell(taskName)} -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false -ErrorAction Stop; ` +
+              `Remove-ItemProperty -LiteralPath ${quotePowerShell(runKey)} -Name ${quotePowerShell(taskName)} -ErrorAction SilentlyContinue; exit 0`,
+          );
+          expect(cleanup.status, cleanup.stderr).toBe(0);
+        }
+      },
+      180_000,
+    );
+
     it("refuses to adopt an empty directory before downloading", () => {
       const fixture = createFixture();
       const result = runInstaller(fixture, {}, [
