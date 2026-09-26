@@ -131,6 +131,36 @@ describe("managed worktree paths", () => {
     );
   });
 
+  it("bounds the actual Git metadata directory for sources that are themselves worktrees", () => {
+    const gitCommonDir = `C:\\${"parent\\".repeat(28)}repo.git`;
+    const target = resolveWorktreeTargetPath({
+      dataDir: "C:\\bb",
+      pathKey: "thread",
+      sourcePath: `C:\\src\\${"repository".repeat(14)}`,
+      gitCommonDir,
+      platform: "win32",
+    });
+    expect(
+      Buffer.byteLength(
+        win32.join(gitCommonDir, "worktrees", win32.basename(target)),
+        "utf8",
+      ),
+    ).toBeLessThanOrEqual(240);
+    expect(win32.basename(target)).toMatch(/-[a-f0-9]{16}$/u);
+  });
+
+  it("rejects a Git common directory without room for worktree metadata", () => {
+    expect(() =>
+      resolveWorktreeTargetPath({
+        dataDir: "C:\\bb",
+        pathKey: "thread",
+        sourcePath: "C:\\src\\repo",
+        gitCommonDir: `C:\\${"parent\\".repeat(33)}repo.git`,
+        platform: "win32",
+      }),
+    ).toThrow(/shorter repository path/iu);
+  });
+
   it("keeps derived targets inside their validated attempt root", () => {
     expect(
       resolveWorktreeTargetPath({

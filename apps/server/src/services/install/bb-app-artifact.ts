@@ -12,6 +12,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -182,6 +183,7 @@ function hostPackageJson(packageJson: BbAppPackageJson): object {
     files: ["dist", "host-daemon", "README.md"],
     engines: packageJson.engines,
     dependencies,
+    bundledDependencies: ["node-pty"],
   };
 }
 
@@ -226,6 +228,18 @@ async function materializePackagedHostPackage(
     ) {
       throw error;
     }
+  }
+  const nodePtyRequire = createRequire(
+    createRequire(join(packageRoot, "package.json")).resolve(
+      "node-pty/package.json",
+    ),
+  );
+  for (const name of ["node-pty", "node-addon-api"]) {
+    await cp(
+      dirname(nodePtyRequire.resolve(`${name}/package.json`)),
+      join(hostPackageRoot, "node_modules", name),
+      { recursive: true, dereference: true },
+    );
   }
   await writeFile(
     join(hostPackageRoot, "package.json"),

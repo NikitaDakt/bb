@@ -22,6 +22,7 @@ const log = (event, details) => {
 const nativeSpawn = childProcess.spawn;
 const nativeSpawnSync = childProcess.spawnSync;
 const owned = [];
+const observedPids = new Set();
 childProcess.spawn = function (command, args, options) {
   const child = nativeSpawn.call(this, command, args, options);
   if (/bash\.exe$/iu.test(command)) {
@@ -44,6 +45,7 @@ childProcess.spawn = function (command, args, options) {
 childProcess.spawnSync = function (command, args, options) {
   if (!/taskkill\.exe$/iu.test(command))
     return nativeSpawnSync.call(this, command, args, options);
+  snapshot();
   const result = nativeSpawnSync.call(this, command, args, {
     ...options,
     stdio: "pipe",
@@ -75,12 +77,18 @@ function snapshot() {
     { encoding: "utf8", timeout: 10_000 },
   );
   const rows = JSON.parse(result.stdout);
-  const ids = new Set(owned.map((child) => child.pid));
+  for (const child of owned) observedPids.add(child.pid);
   for (let pass = 0; pass < rows.length; pass++)
     for (const row of rows)
-      if (ids.has(row.ParentProcessId)) ids.add(row.ProcessId);
-  const tree = rows.filter((row) => ids.has(row.ProcessId));
-  log("process-tree", { tree });
+      if (observedPids.has(row.ParentProcessId))
+        observedPids.add(row.ProcessId);
+  const tree = rows.filter((row) => observedPids.has(row.ProcessId));
+  log("process-tree", {
+    tree,
+    related: rows.filter((row) =>
+      /^(?:bash|sleep|conhost)\.exe$/iu.test(row.Name),
+    ),
+  });
   return tree;
 }
 for (const mode of ["timeout", "abort"]) {

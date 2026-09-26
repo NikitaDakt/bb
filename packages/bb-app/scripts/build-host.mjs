@@ -1,11 +1,13 @@
 import {
   chmod,
   copyFile,
+  cp,
   mkdir,
   readFile,
   rm,
   writeFile,
 } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -103,6 +105,18 @@ await copyFile(
   resolve(packageRoot, "README.md"),
   resolve(hostPackageRoot, "README.md"),
 );
+const nodePtyRequire = createRequire(
+  createRequire(resolve(packageRoot, "package.json")).resolve(
+    "node-pty/package.json",
+  ),
+);
+for (const name of ["node-pty", "node-addon-api"]) {
+  await cp(
+    dirname(nodePtyRequire.resolve(`${name}/package.json`)),
+    resolve(hostPackageRoot, "node_modules", name),
+    { recursive: true, dereference: true },
+  );
+}
 await writeFile(
   resolve(hostPackageRoot, "package.json"),
   `${JSON.stringify(
@@ -120,6 +134,7 @@ await writeFile(
       files: ["dist", "host-daemon", "README.md"],
       engines: sourcePackageJson.engines,
       dependencies,
+      bundledDependencies: ["node-pty"],
     },
     null,
     2,

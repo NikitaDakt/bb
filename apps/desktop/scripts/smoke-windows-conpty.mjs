@@ -1,7 +1,7 @@
 import { execFile, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
@@ -9,9 +9,27 @@ const { Terminal } = createRequire(import.meta.url)("@xterm/headless");
 const execFileAsync = promisify(execFile);
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDirectory, "..", "..", "..");
-const nodePtyRequire = createRequire(
-  join(repoRoot, "apps", "host-daemon", "package.json"),
-);
+const packageRootIndex = process.argv.indexOf("--package-root");
+const packageRoot =
+  packageRootIndex < 0
+    ? join(repoRoot, "apps", "host-daemon")
+    : resolve(process.argv[packageRootIndex + 1]);
+const nodePtyRequire = createRequire(join(packageRoot, "package.json"));
+if (packageRootIndex >= 0) {
+  const dependencyPath = relative(
+    dirname(packageRoot),
+    nodePtyRequire.resolve("node-pty/package.json"),
+  );
+  if (
+    isAbsolute(dependencyPath) ||
+    dependencyPath === ".." ||
+    dependencyPath.startsWith(`..${sep}`)
+  ) {
+    throw new Error(
+      `Packaged node-pty escaped the application: ${dependencyPath}`,
+    );
+  }
+}
 const shellFile = "powershell.exe";
 const shellArgs = [
   "-NoLogo",
@@ -216,7 +234,7 @@ async function smokeWindowsConpty() {
     nodePty = nodePtyRequire("node-pty");
   } catch (error) {
     throw new Error(
-      `Could not load node-pty from apps/host-daemon: ${
+      `Could not load node-pty from ${packageRoot}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );

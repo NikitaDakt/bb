@@ -60,6 +60,9 @@
   "publishConfig": {
     "access": "public"
   },
+  "bundledDependencies": [
+    "node-pty"
+  ],
   "scripts": {
     "build": "node scripts/build.mjs",
     "build:host": "node scripts/build-host.mjs",
