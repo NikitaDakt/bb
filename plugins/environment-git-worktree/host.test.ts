@@ -281,7 +281,6 @@ describe("worktree host entry", () => {
         branchName: "bb/long-name",
       }),
     );
-    expect(result.status).toBe("created");
     if (result.status !== "created") throw new Error(result.message);
     if (process.platform === "win32") {
       expect(result.path.length).toBeLessThan(260);

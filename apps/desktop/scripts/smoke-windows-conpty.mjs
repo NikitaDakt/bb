@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
+const { Terminal } = createRequire(import.meta.url)("@xterm/headless");
 const execFileAsync = promisify(execFile);
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDirectory, "..", "..", "..");
@@ -104,6 +105,7 @@ function currentShellPid(session) {
 }
 
 function spawnShell(nodePty) {
+  const terminal = new Terminal({ cols: 80, rows: 30 });
   const pty = nodePty.spawn(shellFile, shellArgs, {
     cols: 80,
     cwd: tmpdir(),
@@ -120,14 +122,27 @@ function spawnShell(nodePty) {
       resolveExit();
     });
   });
-  pty.onData((data) => {
+  const replies = terminal.onData((data) => {
+    if (!exited) pty.write(data);
+  });
+  const outputSubscription = pty.onData((data) => {
     output += data;
+    if (!exited) terminal.write(data);
   });
   return {
+    disposeTerminal() {
+      replies.dispose();
+      outputSubscription.dispose();
+      terminal.dispose();
+    },
     exit,
     getOutput: () => output,
     isExited: () => exited,
     pty,
+    resize(cols, rows) {
+      terminal.resize(cols, rows);
+      pty.resize(cols, rows);
+    },
   };
 }
 
@@ -147,12 +162,20 @@ function releasePty(pty) {
 }
 
 async function destroyShell(session) {
-  try {
-    session.pty.kill();
-  } catch {}
-  await Promise.race([session.exit, sleep(5_000)]);
+  session.disposeTerminal();
+  if (!session.isExited()) {
+    try {
+      session.pty.kill();
+    } catch {}
+    await Promise.race([session.exit, sleep(5_000)]);
+  }
   const pid = session.pty.pid;
-  if (typeof pid === "number" && Number.isInteger(pid) && pid > 0) {
+  if (
+    !session.isExited() &&
+    typeof pid === "number" &&
+    Number.isInteger(pid) &&
+    pid > 0
+  ) {
     taskkillTree(pid);
     await Promise.race([session.exit, sleep(5_000)]);
   }
@@ -266,9 +289,9 @@ async function smokeWindowsConpty() {
     const session = spawnShell(nodePty);
     try {
       await sleep(shellStartupMs);
-      session.pty.resize(120, 40);
+      session.resize(120, 40);
       await sleep(500);
-      session.pty.resize(80, 30);
+      session.resize(80, 30);
       await sleep(500);
       if (session.isExited()) {
         throw new Error("PowerShell died after resize.");
@@ -311,8 +334,7 @@ async function smokeWindowsConpty() {
           `Shell pid ${String(pid)} survived pty.kill() and is still in tasklist (zombie). tasklist:\n${stdout.trim()}`,
         );
       }
-      releasePty(session.pty);
-      return { detail: `pid=${String(pid)} reaped`, session: null };
+      return { detail: `pid=${String(pid)} reaped`, session };
     } catch (error) {
       await destroyShell(session);
       throw error;
@@ -363,10 +385,9 @@ async function smokeWindowsConpty() {
           `Child pid ${String(childPid)} survived taskkill /T of parent ${String(parentPid)} (zombie). tasklist:\n${stdout.trim()}`,
         );
       }
-      releasePty(session.pty);
       return {
         detail: `parent=${String(parentPid)} child=${String(childPid)} reaped`,
-        session: null,
+        session,
       };
     } catch (error) {
       if (childPid !== null) {
@@ -387,6 +408,10 @@ async function smokeWindowsConpty() {
   if (failures.length > 0) {
     process.exitCode = 1;
   }
+  await sleep(1_500);
+  console.log(
+    `ConPTY remaining async resources: ${process.getActiveResourcesInfo().join(", ")}`,
+  );
 }
 
 await smokeWindowsConpty().catch((error) => {
