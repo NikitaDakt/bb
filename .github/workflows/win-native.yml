@@ -102,7 +102,7 @@ jobs:
           $testFiles = @()
           if ($env:TEST_GROUP -eq 'regressions') {
             $testFiles = @(
-              'windows-process-sweep.test.ts', 'provider-maintenance-kit.test.ts', 'provider-maintenance.test.ts',
+              'windows-process-sweep.test.ts', 'portable-executable.test.ts', 'provider-maintenance-kit.test.ts', 'provider-maintenance.test.ts',
               'runtime.process-lifecycle.test.ts', 'app-server-connection.test.ts',
               'environment-lifecycle-script.test.ts', 'server-move/activation.test.ts', 'server-move/service-definition.test.ts',
               'command/environment-dispatch.test.ts', 'command/environment-hook.test.ts',
