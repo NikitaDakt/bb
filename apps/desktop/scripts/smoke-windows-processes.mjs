@@ -54,6 +54,7 @@ function isInterestingImage(imageName, appImageName) {
     lower === "pwsh.exe" ||
     lower === "cmd.exe" ||
     lower === "conhost.exe" ||
+    lower === "openconsole.exe" ||
     lower === appImageName.toLowerCase() ||
     lower.startsWith("electron")
   );
@@ -189,16 +190,22 @@ async function smokeWindowsProcesses() {
     }
   }
 
-  await sleep(2_000);
-  const after = await snapshotTasklist();
-  await writeFile(join(evidenceDir, "tasklist-after.csv"), after.raw, "utf8");
   const beforePids = new Set(before.rows.map((row) => row.pid));
-  const leaked = after.rows.filter(
-    (row) =>
-      !beforePids.has(row.pid) &&
-      row.pid !== process.pid &&
-      isInterestingImage(row.image, appImageName),
-  );
+  const cleanupStarted = Date.now();
+  let after;
+  let leaked;
+  do {
+    after = await snapshotTasklist();
+    leaked = after.rows.filter(
+      (row) =>
+        !beforePids.has(row.pid) &&
+        row.pid !== process.pid &&
+        isInterestingImage(row.image, appImageName),
+    );
+    if (leaked.length === 0) break;
+    await sleep(pollIntervalMs);
+  } while (Date.now() - cleanupStarted < exitTimeoutMs);
+  await writeFile(join(evidenceDir, "tasklist-after.csv"), after.raw, "utf8");
   if (leaked.length > 0) {
     failures.push(
       `Leaked processes after app shutdown: ${leaked
@@ -207,7 +214,7 @@ async function smokeWindowsProcesses() {
     );
   }
   console.log(
-    `Process hygiene smoke: ${String(after.rows.length)} processes after shutdown, ${String(leaked.length)} new interesting processes.`,
+    `Process hygiene smoke: ${String(after.rows.length)} processes after shutdown, ${String(leaked.length)} new interesting processes after ${String(Date.now() - cleanupStarted)}ms.`,
   );
 
   if (failures.length > 0) {
