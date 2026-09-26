@@ -142,6 +142,7 @@ export interface EnrollmentCommand {
   value: string;
   powershellValue?: string;
   expiresAt: number;
+  unavailable: boolean;
 }
 
 export function ManualMachineSetup({
@@ -204,18 +205,29 @@ export function ManualMachineSetup({
         > = null;
         while (host.lifecycle.phase === "creating") {
           controller.signal.throwIfAborted();
-          if (enrollment === null) {
-            enrollment = await sdk.hosts.experimental_getEnrollmentCommand({
+          const currentEnrollment =
+            await sdk.hosts.experimental_getEnrollmentCommand({
               hostId: host.id,
               signal: controller.signal,
             });
-            setCommand(
-              enrollment === null
-                ? null
+          if (currentEnrollment !== null) {
+            enrollment = currentEnrollment;
+            setCommand({
+              value: currentEnrollment.command,
+              powershellValue: currentEnrollment.powershellCommand,
+              expiresAt: currentEnrollment.expiresAt,
+              unavailable: false,
+            });
+          } else if (enrollment !== null) {
+            const usedEnrollment = enrollment;
+            setCommand((previous) =>
+              previous?.unavailable
+                ? previous
                 : {
-                    value: enrollment.command,
-                    powershellValue: enrollment.powershellCommand,
-                    expiresAt: enrollment.expiresAt,
+                    value: usedEnrollment.command,
+                    powershellValue: usedEnrollment.powershellCommand,
+                    expiresAt: usedEnrollment.expiresAt,
+                    unavailable: true,
                   },
             );
           }
@@ -310,6 +322,7 @@ export function ManualMachineSetupView({
           command={command.value}
           powershellCommand={command.powershellValue}
           expiresAt={command.expiresAt}
+          unavailable={command.unavailable}
           onRegenerate={onRegenerate}
         />
       )}
@@ -374,11 +387,13 @@ export function MachineLaunchCommand({
   command,
   powershellCommand,
   expiresAt,
+  unavailable = false,
   onRegenerate,
 }: {
   command: string;
   powershellCommand?: string;
   expiresAt: number;
+  unavailable?: boolean;
   onRegenerate: () => void;
 }) {
   const [usePowerShell, setUsePowerShell] = useState(false);
@@ -425,7 +440,11 @@ export function MachineLaunchCommand({
         {selectedCommand}
       </pre>
       <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-2">
-        {expired ? (
+        {unavailable ? (
+          <span role="status" className="text-xs text-subtle-foreground">
+            Command used
+          </span>
+        ) : expired ? (
           <>
             <span role="status" className="text-xs text-subtle-foreground">
               Command expired
@@ -453,7 +472,7 @@ export function MachineLaunchCommand({
           size="sm"
           variant="outline"
           className="ml-auto h-7 px-2.5 text-xs"
-          disabled={expired}
+          disabled={expired || unavailable}
           onClick={() => void copy()}
         >
           {copied ? "Copied" : "Copy"}

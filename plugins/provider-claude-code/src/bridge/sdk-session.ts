@@ -57,6 +57,7 @@ export type ClaudeMutableFlagSettings = {
   enableWorkflows: boolean;
   effortLevel?: ClaudeSdkReasoningEffort;
   ultracode: boolean;
+  fastMode: boolean;
 };
 
 type SdkSessionMessageHandler = (message: SDKMessage) => void;

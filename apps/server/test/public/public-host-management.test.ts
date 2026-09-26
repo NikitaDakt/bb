@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
   getEnvironment,
   getHost,
@@ -180,6 +181,20 @@ describe("public host management", () => {
           headers: { "X-BB-Enrollment": credential },
         });
         expect(reused.status).toBe(403);
+        expect(reused.headers.get("content-type")).toContain(
+          extension === "sh" ? "text/x-shellscript" : "text/plain",
+        );
+        const errorBody = await reused.text();
+        expect(errorBody).toContain("already been used, replaced, or expired");
+        if (extension === "sh" && process.platform !== "win32") {
+          const errorScript = spawnSync("sh", ["-c", errorBody], {
+            encoding: "utf8",
+          });
+          expect(errorScript.status).toBe(1);
+          expect(errorScript.stderr).toContain(
+            "already been used, replaced, or expired",
+          );
+        }
       });
     },
   );
