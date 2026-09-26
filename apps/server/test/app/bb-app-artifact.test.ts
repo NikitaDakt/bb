@@ -48,7 +48,7 @@ const packageJson = {
   name: "bb-app",
   version: "1.2.3-test",
   type: "module",
-  os: ["darwin", "linux"],
+  os: ["darwin", "linux", "win32"],
   engines: { node: ">=22.19.0" },
   dependencies: {
     "@parcel/watcher": "2.5.6",
@@ -64,6 +64,7 @@ const packageJson = {
     "bb-host-daemon": "dist/bb-host-daemon.js",
   },
   files: ["dist", "host-daemon", "README.md"],
+  bundledDependencies: ["node-pty"],
 };
 
 type Mode = (typeof MODES)[number];
@@ -73,6 +74,28 @@ function isRepoMode(mode: Mode): boolean {
 }
 
 async function writeHostPackage(root: string, readme: string): Promise<void> {
+  const pty = join(root, "node_modules/node-pty");
+  const headers = join(root, "node_modules/node-addon-api");
+  await mkdir(join(pty, "lib"), { recursive: true });
+  await mkdir(headers, { recursive: true });
+  await writeFile(
+    join(pty, "package.json"),
+    JSON.stringify({
+      name: "node-pty",
+      version: "1.2.0-beta.15",
+      main: "lib/windowsPtyAgent.js",
+      dependencies: { "node-addon-api": "7.1.1" },
+    }),
+  );
+  await writeFile(
+    join(pty, "lib/windowsPtyAgent.js"),
+    "module.exports = 'patched-fixture';\n",
+  );
+  await writeFile(
+    join(headers, "package.json"),
+    JSON.stringify({ name: "node-addon-api", version: "7.1.1" }),
+  );
+  await writeFile(join(headers, "napi.h"), "fixture native headers\n");
   await mkdir(join(root, "dist"), { recursive: true });
   await mkdir(join(root, "host-daemon/dist/bb-chunks"), { recursive: true });
   await writeFile(join(root, "package.json"), JSON.stringify(packageJson));
@@ -269,6 +292,13 @@ describe.each(MODES)("bb-app artifact service (%s)", (mode) => {
       expect(listing).toContain("package/dist/bb.js");
       expect(listing).toContain("package/host-daemon/dist/daemon-bundle.mjs");
       expect(listing).toContain("package/host-daemon/dist/bb");
+      expect(listing).toContain("package/node_modules/node-addon-api/napi.h");
+      expect(
+        await readTarballEntry(
+          artifact.path,
+          "package/node_modules/node-pty/lib/windowsPtyAgent.js",
+        ),
+      ).toBe("module.exports = 'patched-fixture';\n");
       expect(listing).not.toContain("package/private.txt");
       expect(listing.some((entry) => entry.startsWith("package/app/"))).toBe(
         false,
@@ -282,6 +312,7 @@ describe.each(MODES)("bb-app artifact service (%s)", (mode) => {
       expect(packedPackageJson).toMatchObject({
         name: "bb-app",
         version: "1.2.3-test",
+        bundledDependencies: ["node-pty"],
         bin: {
           bb: "dist/bb.js",
           "bb-app": "dist/bb-app.js",

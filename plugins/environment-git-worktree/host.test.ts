@@ -289,6 +289,12 @@ describe("worktree host entry", () => {
       expect(
         Buffer.byteLength(basename(result.path), "utf8"),
       ).toBeLessThanOrEqual(200);
+      expect(
+        Buffer.byteLength(
+          join(sourcePath, ".git", "worktrees", basename(result.path)),
+          "utf8",
+        ),
+      ).toBeLessThanOrEqual(240);
     } else {
       expect(Buffer.byteLength(basename(result.path), "utf8")).toBe(200);
     }

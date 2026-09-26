@@ -1,11 +1,12 @@
 import { sleep, waitForChildExit } from "./child-process-helpers.mjs";
 import { appendOutput, formatProcessOutput } from "./smoke-output.mjs";
-import { spawn, spawnSync } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import {
   createDesktopReleaseConfig,
   resolveDesktopReleaseChannel,
@@ -347,6 +348,30 @@ async function smokePackagedApp() {
         })
       : resolve(process.argv[appPathIndex + 1]);
   await smokePackagedNpm(appBinary);
+  if (process.platform === "win32") {
+    const { stdout, stderr } = await promisify(execFile)(
+      appBinary,
+      [
+        join(scriptDirectory, "smoke-windows-conpty.mjs"),
+        "--package-root",
+        join(
+          dirname(appBinary),
+          "resources",
+          "app.asar.unpacked",
+          "node_modules",
+          "bb-app",
+        ),
+      ],
+      {
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+        timeout: 120_000,
+        maxBuffer: 2 * 1024 * 1024,
+        windowsHide: true,
+      },
+    );
+    process.stdout.write(stdout);
+    process.stderr.write(stderr);
+  }
   const smokeRoot = await mkdtemp(join(tmpdir(), "bb-desktop-packaged-smoke-"));
   const dataDir = join(smokeRoot, "data");
   const userDataDir = join(smokeRoot, "user-data");

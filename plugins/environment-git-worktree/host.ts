@@ -2,7 +2,10 @@ import { experimental_defineHostEntry } from "@get-bb/plugin-sdk/host";
 import { readdir, rm } from "node:fs/promises";
 import { createHostProgress } from "bb-environment-provider-host/progress";
 import { worktreeHostContract, worktreeHostSignals } from "./contract.js";
-import { readDefaultBranchRefs } from "bb-environment-provider-host/git";
+import {
+  getGitCommonDir,
+  readDefaultBranchRefs,
+} from "bb-environment-provider-host/git";
 import {
   resolveDefaultWorktreeBaseBranch,
   resolveWorktreeBaseBranch,
@@ -85,12 +88,19 @@ export function createWorktreeHostEntry() {
         });
       },
       async create(input, context) {
-        const targetPath = resolveWorktreeTargetPath({
-          dataDir: context.experimental_paths.dataDir,
-          pathKey: input.pathKey,
-          sourcePath: input.sourcePath,
-        });
         try {
+          const targetPath = resolveWorktreeTargetPath({
+            dataDir: context.experimental_paths.dataDir,
+            pathKey: input.pathKey,
+            sourcePath: input.sourcePath,
+            ...(process.platform === "win32"
+              ? {
+                  gitCommonDir: await getGitCommonDir(input.sourcePath, {
+                    signal: context.signal,
+                  }),
+                }
+              : {}),
+          });
           const baseBranch = await resolveWorktreeBaseBranch(
             input.sourcePath,
             input.baseBranch,

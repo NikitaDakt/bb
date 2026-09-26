@@ -8,6 +8,7 @@ const WINDOWS_RESERVED_NAME_PATTERN =
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/u;
 const MAX_REPO_DIR_NAME_BYTES = 200;
 const MAX_WINDOWS_GIT_DIR_BYTES = 260 - 40;
+const MAX_WINDOWS_GIT_METADATA_BYTES = 240;
 const REPO_DIR_HASH_LENGTH = 16;
 
 function invalidSourcePath(sourcePath: string): WorkspaceError {
@@ -110,12 +111,13 @@ export function resolveWorktreeTargetPath(args: {
   dataDir: string;
   pathKey: string;
   sourcePath: string;
+  gitCommonDir?: string;
   platform?: NodeJS.Platform;
 }): string {
   const root = resolveWorktreeAttemptRoot(args);
   const pathApi =
     (args.platform ?? process.platform) === "win32" ? path.win32 : path;
-  const maxBytes =
+  let maxBytes =
     pathApi === path.win32
       ? Math.min(
           MAX_REPO_DIR_NAME_BYTES,
@@ -127,10 +129,21 @@ export function resolveWorktreeTargetPath(args: {
             1,
         )
       : MAX_REPO_DIR_NAME_BYTES;
+  if (pathApi === path.win32 && args.gitCommonDir !== undefined) {
+    maxBytes = Math.min(
+      maxBytes,
+      MAX_WINDOWS_GIT_METADATA_BYTES -
+        Buffer.byteLength(
+          pathApi.join(args.gitCommonDir, "worktrees"),
+          "utf8",
+        ) -
+        1,
+    );
+  }
   if (maxBytes < REPO_DIR_HASH_LENGTH + 2) {
     throw new WorkspaceError(
       "invalid_source_path",
-      "The Windows Git worktree path is too long; choose a shorter bb data directory",
+      "The Windows Git worktree path is too long; choose a shorter repository path or bb data directory",
     );
   }
   return pathApi.join(root, deriveRepoDirName(args.sourcePath, maxBytes));
