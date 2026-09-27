@@ -1,5 +1,13 @@
 import path from "node:path";
 
+const FORWARD_SLASH_DRIVE_ABSOLUTE_PATTERN = /^[A-Za-z]:\//u;
+
+export function isForwardSlashAbsoluteHostPath(value: string): boolean {
+  return (
+    value.startsWith("/") || FORWARD_SLASH_DRIVE_ABSOLUTE_PATTERN.test(value)
+  );
+}
+
 export function isWindowsHostPath(value: string): boolean {
   return path.win32.isAbsolute(value) && !path.posix.isAbsolute(value);
 }

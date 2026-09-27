@@ -13,6 +13,7 @@ import {
 import { withEnvironmentCleanupSlot } from "./cleanup-concurrency.js";
 import { ensureHostSessionReadyForWork } from "../hosts/host-lifecycle.js";
 import { foreignProjectOwnedPathRefusal } from "../threads/workspace-path-claims.js";
+import { isForwardSlashAbsoluteHostPath } from "../hosts/host-paths.js";
 import {
   cancelPendingEnvironmentHook,
   runEnvironmentHook,
@@ -369,7 +370,7 @@ async function runCreate(
         const path = z
           .string()
           .min(1)
-          .startsWith("/")
+          .refine(isForwardSlashAbsoluteHostPath)
           .refine((path) => !path.includes("\0"))
           .parse(value);
         if (signal.aborted) return false;

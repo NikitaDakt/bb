@@ -744,6 +744,40 @@ describe("core environment orchestration", () => {
       expect(fixture.row().path).toBe("/tmp/project");
     }));
 
+  it("accepts a forward-slash Windows drive path", async () =>
+    withTestHarness(async (harness) => {
+      const fixture = setup(harness, {
+        create: async (context) => {
+          const claimed = await context.experimental_claimPath(
+            "C:/work/project",
+          );
+          expect(claimed).toBe(true);
+          return {
+            status: "created",
+            path: "C:/work/project",
+            ownsPath: false,
+          };
+        },
+      });
+      fixture.ask();
+      await fixture.settled();
+      expect(fixture.row().path).toBe("C:/work/project");
+    }));
+
+  it("rejects a backslash-only Windows path in claimPath", async () =>
+    withTestHarness(async (harness) => {
+      const fixture = setup(harness, {
+        create: async (context) => {
+          await expect(
+            context.experimental_claimPath("C:\\work\\project"),
+          ).rejects.toThrow();
+          return { status: "failed", message: "invalid path" };
+        },
+      });
+      fixture.ask();
+      await fixture.settled();
+    }));
+
   it("preserves the attached path for live checkout exclusion", async () =>
     withTestHarness(async (harness) => {
       const fixture = setup(harness, {

@@ -19,6 +19,7 @@ import { type ThreadProvisioningDeps } from "./thread-provisioning-environment.j
 import { buildSuggestedBranchName } from "./thread-create-helpers.js";
 import { toThreadResponseFromThread } from "./thread-runtime-display.js";
 import { toEnvironmentResponse } from "../environments/environment-response.js";
+import { isForwardSlashAbsoluteHostPath } from "../hosts/host-paths.js";
 import {
   advanceEnvironmentProvisioning,
   cancelProviderEnvironmentCreation,
@@ -1290,7 +1291,7 @@ async function providerPlacement(
     const parsed = z
       .string()
       .min(1)
-      .startsWith("/")
+      .refine(isForwardSlashAbsoluteHostPath)
       .refine((path) => !path.includes("\0"))
       .nullable()
       .safeParse(invocation.value);
